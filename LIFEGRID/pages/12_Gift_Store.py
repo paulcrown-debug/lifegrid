@@ -959,23 +959,50 @@ except Exception:
 
 
 # =========================================================
-# LOAD WALLET
+# LOAD WALLET (Self-Healing Table Migration)
 # =========================================================
 
-wallet = connection.execute(
-    """
-    SELECT
-        balance,
-        available_balance,
-        pending_balance,
-        currency,
-        wallet_status
-    FROM wallets
-    WHERE user_id = ?
-    LIMIT 1
-    """,
-    (USER_ID,),
-).fetchone()
+try:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wallets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            balance REAL DEFAULT 0.0,
+            available_balance REAL DEFAULT 0.0,
+            pending_balance REAL DEFAULT 0.0,
+            currency TEXT DEFAULT 'USD',
+            wallet_status TEXT DEFAULT 'Active',
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    for _col, _defn in [
+        ("balance", "REAL DEFAULT 0.0"),
+        ("available_balance", "REAL DEFAULT 0.0"),
+        ("pending_balance", "REAL DEFAULT 0.0"),
+        ("currency", "TEXT DEFAULT 'USD'"),
+        ("wallet_status", "TEXT DEFAULT 'Active'"),
+    ]:
+        add_column(connection, "wallets", _col, _defn)
+
+    wallet = connection.execute(
+        """
+        SELECT
+            balance,
+            available_balance,
+            pending_balance,
+            currency,
+            wallet_status
+        FROM wallets
+        WHERE user_id = ?
+        LIMIT 1
+        """,
+        (USER_ID,),
+    ).fetchone()
+except Exception:
+    wallet = None
 
 
 if wallet:
