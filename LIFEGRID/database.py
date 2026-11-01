@@ -81,6 +81,10 @@ def initialize_database():
                 role TEXT DEFAULT 'user',
                 is_creator INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
+                email_verified INTEGER DEFAULT 0,
+                verification_token TEXT,
+                failed_login_attempts INTEGER DEFAULT 0,
+                locked_until TIMESTAMP,
                 kyc_status TEXT DEFAULT 'unverified',
                 last_login TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -247,10 +251,16 @@ def initialize_database():
             )
         """)
 
-        # Safe Column Migrations for Existing Tables
+        # Safe Column Migrations for Users Table
         add_column_if_missing(c, "users", "full_name", "TEXT")
         add_column_if_missing(c, "users", "is_active", "INTEGER DEFAULT 1")
+        add_column_if_missing(c, "users", "email_verified", "INTEGER DEFAULT 0")
+        add_column_if_missing(c, "users", "verification_token", "TEXT")
+        add_column_if_missing(c, "users", "failed_login_attempts", "INTEGER DEFAULT 0")
+        add_column_if_missing(c, "users", "locked_until", "TIMESTAMP")
         add_column_if_missing(c, "users", "last_login", "TIMESTAMP")
+
+        # Safe Column Migrations for Other Tables
         add_column_if_missing(c, "notifications", "notification_type", "TEXT DEFAULT 'general'")
         add_column_if_missing(c, "notifications", "reference", "TEXT")
         add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
