@@ -81,12 +81,11 @@ def initialize_database():
                 role TEXT DEFAULT 'user',
                 is_creator INTEGER DEFAULT 0,
                 is_active INTEGER DEFAULT 1,
-                email_verified INTEGER DEFAULT 0,
-                verification_token TEXT,
                 failed_login_attempts INTEGER DEFAULT 0,
-                locked_until TIMESTAMP,
-                kyc_status TEXT DEFAULT 'unverified',
+                last_failed_login_at TIMESTAMP,
+                last_login_at TIMESTAMP,
                 last_login TIMESTAMP,
+                kyc_status TEXT DEFAULT 'unverified',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -97,7 +96,8 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS password_resets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
-                token TEXT UNIQUE,
+                reset_code TEXT,
+                token TEXT,
                 expires_at TIMESTAMP,
                 used INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -211,6 +211,8 @@ def initialize_database():
                 type TEXT DEFAULT 'general',
                 notification_type TEXT DEFAULT 'general',
                 reference TEXT,
+                reference_type TEXT,
+                reference_id INTEGER,
                 is_read INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -244,25 +246,47 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS activity_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
+                activity_type TEXT,
+                activity_title TEXT,
+                activity_description TEXT,
                 action TEXT,
                 details TEXT,
                 ip_address TEXT,
+                user_agent TEXT,
+                location TEXT,
+                reference_type TEXT,
+                reference_id INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
-        # Safe Column Migrations for Users Table
+        # --- Safe Column Migrations for Users ---
         add_column_if_missing(c, "users", "full_name", "TEXT")
         add_column_if_missing(c, "users", "is_active", "INTEGER DEFAULT 1")
-        add_column_if_missing(c, "users", "email_verified", "INTEGER DEFAULT 0")
-        add_column_if_missing(c, "users", "verification_token", "TEXT")
         add_column_if_missing(c, "users", "failed_login_attempts", "INTEGER DEFAULT 0")
-        add_column_if_missing(c, "users", "locked_until", "TIMESTAMP")
+        add_column_if_missing(c, "users", "last_failed_login_at", "TIMESTAMP")
+        add_column_if_missing(c, "users", "last_login_at", "TIMESTAMP")
         add_column_if_missing(c, "users", "last_login", "TIMESTAMP")
 
-        # Safe Column Migrations for Other Tables
+        # --- Safe Column Migrations for Password Resets ---
+        add_column_if_missing(c, "password_resets", "reset_code", "TEXT")
+
+        # --- Safe Column Migrations for Notifications ---
         add_column_if_missing(c, "notifications", "notification_type", "TEXT DEFAULT 'general'")
         add_column_if_missing(c, "notifications", "reference", "TEXT")
+        add_column_if_missing(c, "notifications", "reference_type", "TEXT")
+        add_column_if_missing(c, "notifications", "reference_id", "INTEGER")
+
+        # --- Safe Column Migrations for Activity Logs ---
+        add_column_if_missing(c, "activity_logs", "activity_type", "TEXT")
+        add_column_if_missing(c, "activity_logs", "activity_title", "TEXT")
+        add_column_if_missing(c, "activity_logs", "activity_description", "TEXT")
+        add_column_if_missing(c, "activity_logs", "user_agent", "TEXT")
+        add_column_if_missing(c, "activity_logs", "location", "TEXT")
+        add_column_if_missing(c, "activity_logs", "reference_type", "TEXT")
+        add_column_if_missing(c, "activity_logs", "reference_id", "INTEGER")
+
+        # --- Safe Column Migrations for Wallets & Withdrawals ---
         add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
         add_column_if_missing(c, "wallets", "currency", "TEXT DEFAULT 'USD'")
         add_column_if_missing(c, "creator_withdrawals", "fee", "REAL DEFAULT 0.0")
