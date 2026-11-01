@@ -110,8 +110,10 @@ def initialize_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER UNIQUE,
                 balance REAL DEFAULT 0.0,
+                pending_balance REAL DEFAULT 0.0,
                 gift_credits INTEGER DEFAULT 0,
                 currency TEXT DEFAULT 'USD',
+                status TEXT DEFAULT 'Active',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -194,6 +196,8 @@ def initialize_database():
             CREATE TABLE IF NOT EXISTS help_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
+                requester_id INTEGER,
+                helper_id INTEGER,
                 subject TEXT,
                 message TEXT,
                 status TEXT DEFAULT 'open',
@@ -236,6 +240,8 @@ def initialize_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER,
                 connected_user_id INTEGER,
+                requester_id INTEGER,
+                receiver_id INTEGER,
                 status TEXT DEFAULT 'accepted',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -286,7 +292,15 @@ def initialize_database():
         add_column_if_missing(c, "activity_logs", "reference_type", "TEXT")
         add_column_if_missing(c, "activity_logs", "reference_id", "INTEGER")
 
+        # --- Safe Column Migrations for Help Requests & Connections ---
+        add_column_if_missing(c, "help_requests", "requester_id", "INTEGER")
+        add_column_if_missing(c, "help_requests", "helper_id", "INTEGER")
+        add_column_if_missing(c, "connections", "requester_id", "INTEGER")
+        add_column_if_missing(c, "connections", "receiver_id", "INTEGER")
+
         # --- Safe Column Migrations for Wallets & Withdrawals ---
+        add_column_if_missing(c, "wallets", "pending_balance", "REAL DEFAULT 0.0")
+        add_column_if_missing(c, "wallets", "status", "TEXT DEFAULT 'Active'")
         add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
         add_column_if_missing(c, "wallets", "currency", "TEXT DEFAULT 'USD'")
         add_column_if_missing(c, "creator_withdrawals", "fee", "REAL DEFAULT 0.0")
