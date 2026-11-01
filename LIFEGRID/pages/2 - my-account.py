@@ -73,9 +73,11 @@ def ensure_profile_tables():
     cursor.execute("PRAGMA table_info(receiving_accounts)")
     receiving_cols = {row[1] for row in cursor.fetchall()}
     receiving_additions = {
+        "receiving_id": "TEXT",
         "account_type": "TEXT DEFAULT 'internal_wallet'",
         "account_status": "TEXT DEFAULT 'Active'",
         "verification_status": "TEXT DEFAULT 'Not Verified'",
+        "currency": "TEXT DEFAULT 'USD'",
         "updated_at": "TIMESTAMP",
     }
     for col, defn in receiving_additions.items():
