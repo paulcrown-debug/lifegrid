@@ -72,6 +72,7 @@ def initialize_database():
                 email TEXT UNIQUE,
                 password_hash TEXT,
                 display_name TEXT,
+                full_name TEXT,
                 bio TEXT,
                 avatar_url TEXT,
                 phone TEXT,
@@ -202,6 +203,8 @@ def initialize_database():
                 title TEXT,
                 message TEXT,
                 type TEXT DEFAULT 'general',
+                notification_type TEXT DEFAULT 'general',
+                reference TEXT,
                 is_read INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -243,6 +246,9 @@ def initialize_database():
         """)
 
         # Safe Column Migrations for Existing Tables
+        add_column_if_missing(c, "users", "full_name", "TEXT")
+        add_column_if_missing(c, "notifications", "notification_type", "TEXT DEFAULT 'general'")
+        add_column_if_missing(c, "notifications", "reference", "TEXT")
         add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
         add_column_if_missing(c, "wallets", "currency", "TEXT DEFAULT 'USD'")
         add_column_if_missing(c, "creator_withdrawals", "fee", "REAL DEFAULT 0.0")
