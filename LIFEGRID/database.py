@@ -80,7 +80,9 @@ def initialize_database():
                 currency TEXT DEFAULT 'NGN',
                 role TEXT DEFAULT 'user',
                 is_creator INTEGER DEFAULT 0,
+                is_active INTEGER DEFAULT 1,
                 kyc_status TEXT DEFAULT 'unverified',
+                last_login TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -247,6 +249,8 @@ def initialize_database():
 
         # Safe Column Migrations for Existing Tables
         add_column_if_missing(c, "users", "full_name", "TEXT")
+        add_column_if_missing(c, "users", "is_active", "INTEGER DEFAULT 1")
+        add_column_if_missing(c, "users", "last_login", "TIMESTAMP")
         add_column_if_missing(c, "notifications", "notification_type", "TEXT DEFAULT 'general'")
         add_column_if_missing(c, "notifications", "reference", "TEXT")
         add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
