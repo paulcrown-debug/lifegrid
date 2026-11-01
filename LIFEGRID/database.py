@@ -1,13 +1,25 @@
-
+import os
 import sqlite3
 from pathlib import Path
 
-
 # ============================================================
-# DATABASE LOCATION
+# DATABASE LOCATION & CONFIGURATION
 # ============================================================
 
 DATABASE_PATH = Path(__file__).parent / "data" / "lifegrid.db"
+
+# Optional Cloud Database (Turso / libSQL) settings
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+try:
+    import streamlit as st
+    if not TURSO_URL and "TURSO_DATABASE_URL" in st.secrets:
+        TURSO_URL = st.secrets["TURSO_DATABASE_URL"]
+    if not TURSO_TOKEN and "TURSO_AUTH_TOKEN" in st.secrets:
+        TURSO_TOKEN = st.secrets["TURSO_AUTH_TOKEN"]
+except Exception:
+    pass
 
 
 # ============================================================
@@ -15,757 +27,239 @@ DATABASE_PATH = Path(__file__).parent / "data" / "lifegrid.db"
 # ============================================================
 
 def get_connection():
-    """Create a connection to the LifeGrid database."""
+    """Create a connection to either Turso (libSQL) or local SQLite."""
+    if TURSO_URL and TURSO_TOKEN:
+        try:
+            import libsql_experimental as libsql
+            return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
+        except Exception as e:
+            print(f"[LifeGrid DB Warning] Cloud DB connection failed, falling back to local SQLite: {e}")
 
-    DATABASE_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    connection = sqlite3.connect(
-        DATABASE_PATH,
-        check_same_thread=False,
-    )
-
-    return connection
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return sqlite3.connect(DATABASE_PATH, check_same_thread=False)
 
 
 # ============================================================
 # SAFE COLUMN ADDITION
 # ============================================================
 
-def add_column_if_missing(
-    cursor,
-    table_name,
-    column_name,
-    column_definition,
-):
-    """
-    Add a column to an existing table if the column
-    does not already exist.
-    """
-
-    cursor.execute(
-        f"PRAGMA table_info({table_name})"
-    )
-
-    existing_columns = {
-        row[1]
-        for row in cursor.fetchall()
-    }
-
-    if column_name not in existing_columns:
-
-        cursor.execute(
-            f"""
-            ALTER TABLE {table_name}
-            ADD COLUMN {column_name}
-            {column_definition}
-            """
-        )
+def add_column_if_missing(cursor, table_name, column_name, column_definition):
+    """Add a column to an existing table if the column does not already exist."""
+    try:
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if column_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
+    except Exception as e:
+        print(f"[LifeGrid DB Migration Notice] Column check on {table_name}.{column_name}: {e}")
 
 
 # ============================================================
-# INITIALIZE DATABASE
+# DATABASE INITIALIZATION
 # ============================================================
 
 def initialize_database():
-    """
-    Create LifeGrid tables and safely upgrade existing
-    database tables when new columns are required.
-    """
-
-    connection = get_connection()
-    cursor = connection.cursor()
-
-    # ========================================================
-    # USERS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            full_name TEXT,
-            country TEXT,
-            currency TEXT DEFAULT 'NGN',
-            is_active INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "full_name",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "country",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "currency",
-        "TEXT DEFAULT 'NGN'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "is_active",
-        "INTEGER DEFAULT 1",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # Security-related user fields.
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "last_login_at",
-        "TIMESTAMP",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "failed_login_attempts",
-        "INTEGER DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "users",
-        "last_failed_login_at",
-        "TIMESTAMP",
-    )
-
-    # ========================================================
-    # PASSWORD RESETS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS password_resets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            reset_code TEXT NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            used INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "password_resets",
-        "used",
-        "INTEGER DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "password_resets",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # GOALS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS goals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            target_date TEXT,
-            progress INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'Active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "goals",
-        "description",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "goals",
-        "target_date",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "goals",
-        "progress",
-        "INTEGER DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "goals",
-        "status",
-        "TEXT DEFAULT 'Active'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "goals",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # HELP REQUESTS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS help_requests (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            requester_id INTEGER NOT NULL,
-            helper_id INTEGER,
-            title TEXT NOT NULL,
-            description TEXT,
-            category TEXT,
-            help_type TEXT,
-            target_date TEXT,
-            status TEXT DEFAULT 'Open',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            accepted_at TIMESTAMP,
-            completed_at TIMESTAMP,
-            confirmed_at TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "helper_id",
-        "INTEGER",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "description",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "category",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "help_type",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "target_date",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "status",
-        "TEXT DEFAULT 'Open'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "accepted_at",
-        "TIMESTAMP",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "completed_at",
-        "TIMESTAMP",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "help_requests",
-        "confirmed_at",
-        "TIMESTAMP",
-    )
-
-    # ========================================================
-    # WALLETS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS wallets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER UNIQUE NOT NULL,
-            balance REAL DEFAULT 0,
-            pending_balance REAL DEFAULT 0,
-            currency TEXT DEFAULT 'NGN',
-            status TEXT DEFAULT 'Active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallets",
-        "balance",
-        "REAL DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallets",
-        "pending_balance",
-        "REAL DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallets",
-        "currency",
-        "TEXT DEFAULT 'NGN'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallets",
-        "status",
-        "TEXT DEFAULT 'Active'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallets",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # RECEIVING ACCOUNTS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS receiving_accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER UNIQUE NOT NULL,
-            receiving_id TEXT UNIQUE NOT NULL,
-            currency TEXT DEFAULT 'NGN',
-            status TEXT DEFAULT 'Active',
-            verification_status TEXT DEFAULT 'Pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "receiving_accounts",
-        "receiving_id",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "receiving_accounts",
-        "currency",
-        "TEXT DEFAULT 'NGN'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "receiving_accounts",
-        "status",
-        "TEXT DEFAULT 'Active'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "receiving_accounts",
-        "verification_status",
-        "TEXT DEFAULT 'Pending'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "receiving_accounts",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # WALLET TRANSACTIONS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS wallet_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            transaction_type TEXT NOT NULL,
-            category TEXT,
-            amount REAL NOT NULL DEFAULT 0,
-            currency TEXT DEFAULT 'NGN',
-            status TEXT DEFAULT 'Completed',
-            description TEXT,
-            reference TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "transaction_type",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "category",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "amount",
-        "REAL DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "currency",
-        "TEXT DEFAULT 'NGN'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "status",
-        "TEXT DEFAULT 'Completed'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "description",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "reference",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "wallet_transactions",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # NOTIFICATIONS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            notification_type TEXT,
-            title TEXT NOT NULL,
-            message TEXT NOT NULL,
-            reference_type TEXT,
-            reference_id INTEGER,
-            is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "notifications",
-        "notification_type",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "notifications",
-        "reference_type",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "notifications",
-        "reference_id",
-        "INTEGER",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "notifications",
-        "is_read",
-        "INTEGER DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "notifications",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # MESSAGES
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER NOT NULL,
-            receiver_id INTEGER NOT NULL,
-            message TEXT NOT NULL,
-            is_read INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "messages",
-        "is_read",
-        "INTEGER DEFAULT 0",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "messages",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # CONNECTIONS
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS connections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            requester_id INTEGER NOT NULL,
-            receiver_id INTEGER NOT NULL,
-            status TEXT NOT NULL DEFAULT 'Pending',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            responded_at TIMESTAMP,
-            UNIQUE(requester_id, receiver_id)
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "connections",
-        "status",
-        "TEXT DEFAULT 'Pending'",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "connections",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "connections",
-        "responded_at",
-        "TIMESTAMP",
-    )
-
-    # ========================================================
-    # ACTIVITY & SECURITY LOG
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS activity_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            activity_type TEXT NOT NULL,
-            activity_title TEXT NOT NULL,
-            activity_description TEXT,
-            ip_address TEXT,
-            user_agent TEXT,
-            location TEXT,
-            reference_type TEXT,
-            reference_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-        """
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "activity_description",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "ip_address",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "user_agent",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "location",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "reference_type",
-        "TEXT",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "reference_id",
-        "INTEGER",
-    )
-
-    add_column_if_missing(
-        cursor,
-        "activity_logs",
-        "created_at",
-        "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-    )
-
-    # ========================================================
-    # SECURITY INDEXES
-    # ========================================================
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_activity_logs_user
-        ON activity_logs(user_id)
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_activity_logs_type
-        ON activity_logs(activity_type)
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_activity_logs_created
-        ON activity_logs(created_at)
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_notifications_user
-        ON notifications(user_id)
-        """
-    )
-
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_messages_receiver
-        ON messages(receiver_id)
-        """
-    )
-
-    # ========================================================
-    # COMMIT CHANGES
-    # ========================================================
-
-    connection.commit()
-    connection.close()
-
-
-# ============================================================
-# AUTOMATIC DATABASE INITIALIZATION
-# ============================================================
-
-initialize_database()
-
+    """Initialize all LifeGrid tables and run required schema migrations."""
+    conn = get_connection()
+    c = conn.cursor()
+
+    try:
+        # Users
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                email TEXT UNIQUE,
+                password_hash TEXT,
+                display_name TEXT,
+                bio TEXT,
+                avatar_url TEXT,
+                phone TEXT,
+                country TEXT DEFAULT 'Nigeria',
+                currency TEXT DEFAULT 'NGN',
+                role TEXT DEFAULT 'user',
+                is_creator INTEGER DEFAULT 0,
+                kyc_status TEXT DEFAULT 'unverified',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Password Resets
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                token TEXT UNIQUE,
+                expires_at TIMESTAMP,
+                used INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Wallets
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS wallets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNIQUE,
+                balance REAL DEFAULT 0.0,
+                gift_credits INTEGER DEFAULT 0,
+                currency TEXT DEFAULT 'USD',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Creator Receiving Accounts
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS receiving_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                payout_method TEXT DEFAULT 'bank',
+                currency TEXT DEFAULT 'NGN',
+                bank_name TEXT,
+                account_number TEXT,
+                account_name TEXT,
+                bank_code TEXT,
+                is_primary INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Creator Withdrawals
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS creator_withdrawals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                amount REAL,
+                currency TEXT DEFAULT 'NGN',
+                fee REAL DEFAULT 0.0,
+                net_amount REAL,
+                status TEXT DEFAULT 'Pending',
+                payout_method TEXT DEFAULT 'bank',
+                bank_name TEXT,
+                account_number TEXT,
+                account_name TEXT,
+                withdrawal_reference TEXT UNIQUE,
+                transaction_reference TEXT,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                processed_at TIMESTAMP
+            )
+        """)
+
+        # Transactions
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                type TEXT,
+                amount REAL,
+                currency TEXT DEFAULT 'USD',
+                status TEXT DEFAULT 'completed',
+                reference TEXT UNIQUE,
+                description TEXT,
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Goals
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                title TEXT,
+                description TEXT,
+                target_amount REAL DEFAULT 0.0,
+                current_amount REAL DEFAULT 0.0,
+                currency TEXT DEFAULT 'USD',
+                status TEXT DEFAULT 'active',
+                category TEXT DEFAULT 'General',
+                deadline DATE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Help Requests
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS help_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                subject TEXT,
+                message TEXT,
+                status TEXT DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Notifications
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                title TEXT,
+                message TEXT,
+                type TEXT DEFAULT 'general',
+                is_read INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Messages
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sender_id INTEGER,
+                receiver_id INTEGER,
+                content TEXT,
+                is_read INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Connections
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS connections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                connected_user_id INTEGER,
+                status TEXT DEFAULT 'accepted',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Activity Logs
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                action TEXT,
+                details TEXT,
+                ip_address TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # Safe Column Migrations for Existing Tables
+        add_column_if_missing(c, "wallets", "gift_credits", "INTEGER DEFAULT 0")
+        add_column_if_missing(c, "wallets", "currency", "TEXT DEFAULT 'USD'")
+        add_column_if_missing(c, "creator_withdrawals", "fee", "REAL DEFAULT 0.0")
+        add_column_if_missing(c, "creator_withdrawals", "net_amount", "REAL")
+        add_column_if_missing(c, "creator_withdrawals", "payout_method", "TEXT DEFAULT 'bank'")
+        add_column_if_missing(c, "creator_withdrawals", "transaction_reference", "TEXT")
+        add_column_if_missing(c, "creator_withdrawals", "processed_at", "TIMESTAMP")
+
+        conn.commit()
+    except Exception as e:
+        print(f"[LifeGrid DB Warning] Initialization notice: {e}")
+    finally:
+        conn.close()
+
+
+# Auto-initialize database on import
+try:
+    initialize_database()
+except Exception as e:
+    print(f"[LifeGrid DB Warning] Auto-init failed: {e}")
