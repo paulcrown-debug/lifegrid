@@ -57,7 +57,7 @@ if "reset_code" not in st.session_state:
 # EXACT LIFEGRID PAGE PATHS
 # ============================================================
 
-PAGE_ACCOUNT = "pages/2 - My - Account.py"
+PAGE_ACCOUNT = "pages/2 - my-account.py"
 PAGE_GOALS = "pages/3_Goals.py"
 PAGE_HELP = "pages/4_Help.py"
 PAGE_WALLET = "pages/5_Wallet.py"
