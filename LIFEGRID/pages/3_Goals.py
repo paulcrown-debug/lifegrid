@@ -60,8 +60,11 @@ def ensure_goals_table():
 
     additions = {
         "category": "TEXT DEFAULT 'Personal'",
+        "target_date": "DATE",
         "target_amount": "REAL DEFAULT 0.0",
         "currency": "TEXT DEFAULT 'USD'",
+        "progress": "INTEGER DEFAULT 0",
+        "status": "TEXT DEFAULT 'Active'",
     }
     for col, defn in additions.items():
         if col not in existing_cols:
