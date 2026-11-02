@@ -28,7 +28,11 @@ except Exception:
 
 def get_connection():
     """Create a connection to either Turso (libSQL) or local SQLite."""
-    if TURSO_URL and TURSO_TOKEN:
+    if TURSO_URL or TURSO_TOKEN:
+        if not TURSO_URL or not TURSO_TOKEN:
+            raise RuntimeError(
+                "Turso configuration is incomplete; both database URL and auth token are required."
+            )
         try:
             import libsql_experimental as libsql
             return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
