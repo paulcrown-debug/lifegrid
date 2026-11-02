@@ -70,11 +70,13 @@ def safe_switch_page(candidates, fallback_label):
 # DATABASE CONNECTION & SCHEMA ENSURANCE
 # =========================================================
 def get_db_connection():
-    try:
-        from database import get_connection
-        return get_connection()
-    except Exception:
-        return sqlite3.connect("lifegrid.db", check_same_thread=False)
+    import sys
+    from pathlib import Path
+    _root = Path(__file__).resolve().parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from database import get_connection
+    return get_connection()
 
 
 def ensure_feed_and_tipping_schemas(connection):

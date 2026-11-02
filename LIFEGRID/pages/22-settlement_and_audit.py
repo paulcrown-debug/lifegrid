@@ -34,13 +34,14 @@ except ImportError:
 # DATABASE ACCESS & HELPERS
 # =========================================================
 def get_db():
-    """Connect to SQLite database with robust concurrency settings."""
-    try:
-        from database import get_connection
-        return get_connection()
-    except Exception:
-        db_path = os.environ.get("LIFEGRID_DB_PATH", "lifegrid.db")
-        return sqlite3.connect(db_path, check_same_thread=False)
+    """Connect to unified LifeGrid database (Turso libSQL or local)."""
+    import sys
+    from pathlib import Path
+    _root = Path(__file__).resolve().parent.parent
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+    from database import get_connection
+    return get_connection()
 
 
 def get_table_columns(conn, table_name):

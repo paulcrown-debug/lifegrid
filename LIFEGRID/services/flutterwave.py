@@ -75,22 +75,35 @@ def _get_redirect_url() -> str:
 
 
 def is_flutterwave_configured() -> bool:
-    """True only for a plausible live Flutterwave secret key, not a test key/place-holder."""
+    """True for a valid Flutterwave secret key (supports both Live and Test sandbox keys)."""
     key = _get_secret_key()
     if not key:
         return False
     upper = key.upper()
-    if upper.startswith("FLWSECK_TEST") or "YOUR_LIVE_SECRET_KEY" in upper or "YOUR_TEST_KEY" in upper:
+    if "YOUR_LIVE_SECRET_KEY" in upper or "YOUR_TEST_KEY" in upper or "PLACEHOLDER" in upper:
         return False
-    # Live Flutterwave secret keys normally use the FLWSECK- prefix.
-    return upper.startswith("FLWSECK-") and len(key) >= 20
+    # Live keys start with FLWSECK-, sandbox test keys start with FLWSECK_TEST- or FLWSECK_TEST_
+    return (upper.startswith("FLWSECK-") or upper.startswith("FLWSECK_TEST")) and len(key) >= 15
+
+
+def get_flutterwave_mode() -> str:
+    """Return 'live', 'test', or 'unconfigured'."""
+    key = _get_secret_key()
+    if not key or not is_flutterwave_configured():
+        return "unconfigured"
+    upper = key.upper()
+    if upper.startswith("FLWSECK_TEST"):
+        return "test"
+    if upper.startswith("FLWSECK-"):
+        return "live"
+    return "configured"
 
 
 def _headers() -> dict[str, str]:
     key = _get_secret_key()
     if not is_flutterwave_configured():
         raise RuntimeError(
-            "A valid LIVE Flutterwave secret key is not configured. Test/simulated operations are disabled."
+            "Flutterwave secret key is not configured. Please set FLUTTERWAVE_SECRET_KEY in Streamlit Secrets."
         )
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
@@ -313,3 +326,101 @@ def verify_bank_account(account_number: str, bank_code: str, fallback_name: str 
     """Backward-compatible wrapper returning the real resolved account name or None."""
     result = resolve_bank_account(account_number, bank_code, fallback_name)
     return result.get("account_name") if result.get("success") else None
+
+
+
+def execute_payout_transfer(
+    *,
+    account_bank: str,
+    account_number: str,
+    amount: Any,
+    currency: str = "NGN",
+    narration: str = "LifeGrid Creator Payout",
+    reference: str = "",
+    beneficiary_name: str = "",
+) -> dict[str, Any]:
+    """Initiate a Flutterwave transfer (payout) to a bank account (supports Live and Sandbox)."""
+    if not is_flutterwave_configured():
+        return {
+            "success": False,
+            "status": "UNCONFIGURED",
+            "message": "Flutterwave secret key is not configured.",
+        }
+
+    try:
+        amount_value = Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError("Invalid payout amount.") from exc
+
+    if amount_value <= 0:
+        raise ValueError("Payout amount must be positive.")
+
+    payload = {
+        "account_bank": str(account_bank).strip(),
+        "account_number": str(account_number).strip(),
+        "amount": format(amount_value, "f"),
+        "currency": str(currency or "NGN").strip().upper(),
+        "narration": str(narration or "LifeGrid Creator Payout")[:100],
+        "reference": str(reference or "").strip(),
+        "beneficiary_name": str(beneficiary_name or "").strip()[:100],
+    }
+
+    try:
+        response = requests.post(
+            f"{_get_base_url()}/transfers",
+            json=payload,
+            headers=_headers(),
+            timeout=25,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Could not reach Flutterwave for transfer: {exc}") from exc
+
+    body = _response_json(response)
+    if response.status_code not in (200, 201) or str(body.get("status", "")).lower() != "success":
+        message = body.get("message") or f"Flutterwave transfer failed (HTTP {response.status_code})."
+        return {"success": False, "status": "FAILED", "message": str(message), "data": body.get("data") or {}}
+
+    data = body.get("data") or {}
+    return {
+        "success": True,
+        "status": str(data.get("status") or "SUCCESSFUL").upper(),
+        "transfer_id": str(data.get("id") or ""),
+        "reference": str(data.get("reference") or payload["reference"]),
+        "message": body.get("message") or "Transfer initiated successfully.",
+        "data": data,
+    }
+
+
+def get_transfer_status(transfer_id: Any) -> dict[str, Any]:
+    """Query live transfer status from Flutterwave by transfer ID."""
+    clean_id = str(transfer_id or "").strip()
+    if not clean_id:
+        raise ValueError("Transfer ID is required.")
+    if not is_flutterwave_configured():
+        return {
+            "success": False,
+            "message": "Flutterwave secret key is not configured.",
+            "data": {},
+        }
+
+    try:
+        response = requests.get(
+            f"{_get_base_url()}/transfers/{clean_id}",
+            headers=_headers(),
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Could not contact Flutterwave: {exc}") from exc
+
+    body = _response_json(response)
+    if response.status_code != 200 or str(body.get("status", "")).lower() != "success":
+        message = body.get("message") or f"Flutterwave query returned HTTP {response.status_code}."
+        return {"success": False, "message": str(message), "data": {}}
+
+    data = body.get("data") or {}
+    return {
+        "success": True,
+        "status": str(data.get("status") or "").upper(),
+        "data": data,
+        "message": body.get("message") or "Transfer status retrieved successfully.",
+    }

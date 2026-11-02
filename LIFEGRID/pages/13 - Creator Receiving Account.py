@@ -4,12 +4,12 @@ from datetime import datetime
 
 import streamlit as st
 
-try:
-    from database import get_connection
-except ImportError:
-    import sqlite3
-    def get_connection():
-        return sqlite3.connect("lifegrid.db", check_same_thread=False)
+import sys
+from pathlib import Path
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+from database import get_connection
 
 st.set_page_config(
     page_title="Creator Receiving Account | LifeGrid",

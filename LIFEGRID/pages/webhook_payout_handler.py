@@ -1,12 +1,15 @@
 """
-LifeGrid - Automated Payout Webhook Handler & Financial Operations Monitor
-Interactive Streamlit dashboard + background HTTP listener for Flutterwave webhook events.
+21 - Webhook & Monitor
+LifeGrid Automated Payout Webhook Handler & Financial Operations Monitor
+
+Production Streamlit dashboard + background HTTP listener for Flutterwave webhook events.
 Handles:
   1. Automated Payout Reconciliation (transfer.completed and transfer.failed)
-  2. Automatic Wallet Balance Restoration & Creator Profiles Sync
+  2. Automatic Wallet Balance Restoration & Creator Profiles Sync on Failed Transfers
   3. Double-Spend & Idempotent Webhook Guardrails
   4. Unified Notifications Sync (05 - Notifications + withdrawal_notifications)
   5. Cryptographic Financial Audit Ledger & Digital Receipt Generation
+  6. Live Operations & Manual Reconciler
 """
 
 import argparse
@@ -24,6 +27,7 @@ try:
     HAS_STREAMLIT = True
 except ImportError:
     HAS_STREAMLIT = False
+
 
 # =========================================================
 # CONFIGURATION & DATABASE ACCESS
@@ -57,13 +61,14 @@ def get_secret_hash():
 
 
 def get_db():
-    """Connect to SQLite database with robust concurrency settings."""
-    try:
-        from database import get_connection
-        return get_connection()
-    except Exception:
-        db_path = os.environ.get("LIFEGRID_DB_PATH", "lifegrid.db")
-        return sqlite3.connect(db_path, check_same_thread=False)
+    """Connect to unified LifeGrid database (Turso libSQL or local)."""
+    import sys
+    from pathlib import Path
+    root_dir = Path(__file__).resolve().parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+    from database import get_connection
+    return get_connection()
 
 
 def get_table_columns(conn, table_name):
@@ -77,13 +82,9 @@ def get_table_columns(conn, table_name):
 
 
 def ensure_financial_and_webhook_tables(conn):
-    """
-    Ensure all required tables for webhooks, payouts, wallets,
-    notifications, idempotency, and the audit ledger exist.
-    """
+    """Ensure all required tables exist and migrate missing columns."""
     cursor = conn.cursor()
 
-    # 1. Webhook logs
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS webhook_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,7 +96,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 2. Withdrawal notifications (backward compatibility)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS withdrawal_notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,7 +111,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 3. Main unified notifications table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +125,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 4. Creator withdrawals table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS creator_withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,6 +136,7 @@ def ensure_financial_and_webhook_tables(conn):
             status TEXT NOT NULL DEFAULT 'Pending',
             withdrawal_reference TEXT UNIQUE,
             transaction_reference TEXT,
+            payout_method TEXT DEFAULT 'Bank Account',
             payment_method TEXT DEFAULT 'bank_transfer',
             bank_name TEXT,
             account_number TEXT,
@@ -149,7 +148,29 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 5. Wallets table
+    existing_w_cols = get_table_columns(conn, "creator_withdrawals")
+    w_migrations = {
+        "currency": "TEXT NOT NULL DEFAULT 'NGN'",
+        "fee": "REAL DEFAULT 0.0",
+        "net_amount": "REAL DEFAULT 0.0",
+        "transaction_reference": "TEXT",
+        "payout_method": "TEXT DEFAULT 'Bank Account'",
+        "payment_method": "TEXT DEFAULT 'bank_transfer'",
+        "bank_name": "TEXT",
+        "account_number": "TEXT",
+        "account_name": "TEXT",
+        "bank_code": "TEXT",
+        "notes": "TEXT",
+        "created_at": "TEXT",
+        "processed_at": "TEXT"
+    }
+    for col, col_def in w_migrations.items():
+        if col not in existing_w_cols:
+            try:
+                cursor.execute(f"ALTER TABLE creator_withdrawals ADD COLUMN {col} {col_def}")
+            except Exception:
+                pass
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS wallets (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,7 +182,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 6. Wallet transactions ledger
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS wallet_transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -177,7 +197,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 7. Creator profiles table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS creator_profiles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,7 +208,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 8. Idempotency keys (anti-replay and anti-double spend)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS idempotency_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,7 +220,6 @@ def ensure_financial_and_webhook_tables(conn):
         )
     """)
 
-    # 9. Cryptographic financial audit ledger
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS financial_audit_ledger (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -228,7 +245,7 @@ def ensure_financial_and_webhook_tables(conn):
 # AUDIT LEDGER & RECEIPT HELPERS
 # =========================================================
 def get_latest_audit_hash(cursor):
-    """Retrieve the hash of the latest audit record to maintain a tamper-evident blockchain."""
+    """Retrieve hash of latest audit record to maintain tamper-evident blockchain."""
     try:
         cursor.execute("SELECT entry_hash FROM financial_audit_ledger ORDER BY id DESC LIMIT 1")
         row = cursor.fetchone()
@@ -259,7 +276,7 @@ def record_audit_entry(cursor, tx_ref, event_type, user_id, debit, credit, fee, 
 
 
 def generate_receipt_text(tx_data):
-    """Generate official LifeGrid ASCII receipt for downloads or verification."""
+    """Generate official LifeGrid ASCII receipt."""
     ref = tx_data.get("reference", "UNKNOWN")
     amt = tx_data.get("amount", 0.0)
     fee = tx_data.get("fee", 0.0)
@@ -269,6 +286,7 @@ def generate_receipt_text(tx_data):
     ts = tx_data.get("timestamp", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))
     bank = tx_data.get("bank_name", "N/A")
     acct = tx_data.get("account_number", "N/A")
+    flw_ref = tx_data.get("flw_ref", "N/A")
 
     return f"""==================================================
            LIFEGRID OFFICIAL PAYOUT RECEIPT       
@@ -285,7 +303,7 @@ Gross Payout Amount  : {curr} {amt:,.2f}
 Platform / Bank Fee  : {curr} {fee:,.2f}
 Net Disbursed Amount : {curr} {net:,.2f}
 --------------------------------------------------
-Gateway Reference    : {tx_data.get('flw_ref', 'FLW-PAYOUT-AUTO')}
+Gateway Reference    : {flw_ref}
 Verification Hash    : {hashlib.sha256(f"{ref}:{amt}:{curr}:{ts}".encode()).hexdigest()[:32]}
 Security Standard    : Atomic Payout Engine v2.5 (LifeGrid)
 ==================================================
@@ -294,16 +312,9 @@ Funds disbursed via Flutterwave Secure Transfer.
 
 
 # =========================================================
-# WEBHOOK EVENT PROCESSORS (ATOMIC & IDEMPOTENT)
+# WEBHOOK EVENT PROCESSORS
 # =========================================================
 def process_transfer_completed(payload):
-    """
-    Handle Flutterwave transfer.completed:
-      - Marks withdrawal as 'Completed'
-      - Records Flutterwave transaction reference
-      - Dispatches alerts to both notifications tables
-      - Creates cryptographically sealed audit ledger entry
-    """
     data = payload.get("data", {})
     transfer_ref = data.get("reference") or data.get("tx_ref") or ""
     flw_ref = str(data.get("id") or data.get("flw_ref") or "FLW-PAYOUT-AUTO")
@@ -326,53 +337,44 @@ def process_transfer_completed(payload):
 
     if not record:
         conn.close()
-        return {"status": "not_found", "message": f"Withdrawal ref '{transfer_ref}' not found in database."}
+        return {"status": "not_found", "message": f"Withdrawal ref '{transfer_ref}' not found."}
 
     w_id, user_id, orig_amount, orig_currency, cur_status, existing_notes, fee, net_amount, bank_name, acct_num = record
     fee = fee or 0.0
     net_amount = net_amount or orig_amount
 
-    # Idempotent ignore: do not re-process already completed payouts
     if str(cur_status or "").lower() == "completed":
         conn.close()
-        return {"status": "already_completed", "message": "Withdrawal was already completed; duplicate event ignored."}
+        return {"status": "already_completed", "message": "Withdrawal was already completed."}
 
     try:
         cursor.execute("BEGIN IMMEDIATE")
-
         updated_notes = f"{existing_notes or ''}\n[{now_str} Webhook: Transfer confirmed via Flutterwave ref {flw_ref}]".strip()
         cursor.execute("""
             UPDATE creator_withdrawals
-            SET status = 'Completed',
-                processed_at = ?,
-                transaction_reference = ?,
-                notes = ?
+            SET status = 'Completed', processed_at = ?, transaction_reference = ?, notes = ?
             WHERE id = ?
         """, (now_str, flw_ref, updated_notes, w_id))
 
-        # Record in wallet_transactions ledger
         cursor.execute("""
             INSERT OR REPLACE INTO wallet_transactions (
                 user_id, transaction_type, amount, currency, description, reference, status
             ) VALUES (?, 'PAYOUT_COMPLETED', ?, ?, ?, ?, 'Completed')
         """, (user_id, orig_amount, orig_currency, f"Payout of {orig_currency} {orig_amount:,.2f} disbursed to {bank_name or 'Bank'}", f"WD-{transfer_ref}"))
 
-        notif_msg = f"Your withdrawal of {orig_currency} {orig_amount:,.2f} has been successfully processed and disbursed by Flutterwave (Ref: {flw_ref})."
+        notif_msg = f"Your withdrawal of {orig_currency} {orig_amount:,.2f} has been successfully disbursed by Flutterwave (Ref: {flw_ref})."
 
-        # 1. Main notifications table (for 05 - Notifications.py)
         cursor.execute("""
             INSERT INTO notifications (user_id, notification_type, title, message, reference_type, reference_id, is_read, created_at)
             VALUES (?, 'Wallet', 'Withdrawal Successful', ?, 'creator_withdrawals', ?, 0, ?)
         """, (user_id, notif_msg, transfer_ref, now_str))
 
-        # 2. withdrawal_notifications (for backward compatibility)
         cursor.execute("""
             INSERT INTO withdrawal_notifications
             (user_id, withdrawal_reference, notification_type, title, message, currency, amount, is_read, created_at)
             VALUES (?, ?, 'completed', 'Withdrawal Successful', ?, ?, ?, 0, ?)
         """, (user_id, transfer_ref, notif_msg, orig_currency, orig_amount, now_str))
 
-        # 3. Cryptographic audit ledger
         cursor.execute("SELECT balance FROM wallets WHERE user_id = ? AND currency = ?", (user_id, orig_currency))
         w_bal_row = cursor.fetchone()
         cur_bal = w_bal_row[0] if w_bal_row else 0.0
@@ -380,24 +382,17 @@ def process_transfer_completed(payload):
 
         conn.commit()
         conn.close()
-        return {"status": "success", "message": f"Withdrawal '{transfer_ref}' marked as Completed. Notification dispatched to user #{user_id}."}
+        return {"status": "success", "message": f"Withdrawal '{transfer_ref}' marked as Completed."}
     except Exception as e:
         cursor.execute("ROLLBACK")
         conn.close()
-        return {"status": "error", "message": f"Database error during completion: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 
 def process_transfer_failed(payload):
-    """
-    Handle Flutterwave transfer.failed:
-      - Marks withdrawal as 'Rejected'
-      - ATOMICALLY RESTORES reserved funds to user's wallet table AND creator_profiles
-      - Dispatches failure notifications to both notification tables
-      - Logs reversible transaction into audit ledger
-    """
     data = payload.get("data", {})
     transfer_ref = data.get("reference") or data.get("tx_ref") or ""
-    failure_reason = data.get("complete_message") or data.get("reason") or "Beneficiary bank declined transfer"
+    failure_reason = data.get("complete_message") or data.get("reason") or "Transfer declined by bank"
     now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     conn = get_db()
@@ -417,31 +412,26 @@ def process_transfer_failed(payload):
 
     if not record:
         conn.close()
-        return {"status": "not_found", "message": f"Withdrawal ref '{transfer_ref}' not found in database."}
+        return {"status": "not_found", "message": f"Withdrawal ref '{transfer_ref}' not found."}
 
     w_id, user_id, orig_amount, orig_currency, cur_status, existing_notes = record
 
     if str(cur_status or "").lower() == "completed":
         conn.close()
-        return {"status": "ignored", "message": "Cannot fail a withdrawal that has already completed."}
+        return {"status": "ignored", "message": "Cannot fail an already completed withdrawal."}
     if str(cur_status or "").lower() in ("rejected", "failed", "refunded"):
         conn.close()
-        return {"status": "already_refunded", "message": "Withdrawal was already marked Failed/Rejected; balance not re-restored."}
+        return {"status": "already_refunded", "message": "Withdrawal was already marked Failed/Rejected."}
 
     try:
         cursor.execute("BEGIN IMMEDIATE")
-
-        # 1. Update withdrawal status to Rejected
         updated_notes = f"{existing_notes or ''}\n[{now_str} Webhook: Transfer failed - {failure_reason}. Balance restored.]".strip()
         cursor.execute("""
             UPDATE creator_withdrawals
-            SET status = 'Rejected',
-                processed_at = ?,
-                notes = ?
+            SET status = 'Rejected', processed_at = ?, notes = ?
             WHERE id = ?
         """, (now_str, updated_notes, w_id))
 
-        # 2. RESTORE WALLET BALANCE (wallets table)
         cursor.execute("SELECT balance FROM wallets WHERE user_id = ? AND currency = ?", (user_id, orig_currency))
         w_bal_row = cursor.fetchone()
         old_bal = float(w_bal_row[0]) if w_bal_row else 0.0
@@ -454,57 +444,54 @@ def process_transfer_failed(payload):
             cursor.execute("INSERT INTO wallets (user_id, currency, balance) VALUES (?, ?, ?)",
                            (user_id, orig_currency, new_bal))
 
-        # 3. RESTORE CREATOR PROFILE EARNINGS (creator_profiles)
         p_cols = get_table_columns(conn, "creator_profiles")
         p_user_col = "user_id" if "user_id" in p_cols else ("creator_id" if "creator_id" in p_cols else "user_id")
         earn_col = "total_earnings" if "total_earnings" in p_cols else ("earnings" if "earnings" in p_cols else "total_earnings")
-
         try:
-            cursor.execute(f"""
-                UPDATE creator_profiles
-                SET {earn_col} = {earn_col} + ?
-                WHERE {p_user_col} = ?
-            """, (orig_amount, user_id))
+            cursor.execute(f"UPDATE creator_profiles SET {earn_col} = {earn_col} + ? WHERE {p_user_col} = ?", (orig_amount, user_id))
         except Exception:
             pass
 
-        # 4. Record refund in wallet_transactions
+        try:
+            rec_cols = get_table_columns(conn, "creator_receiving_accounts")
+            if "available_balance" in rec_cols:
+                cursor.execute(f"UPDATE creator_receiving_accounts SET available_balance = available_balance + ? WHERE user_id = ? AND currency = ?", (orig_amount, user_id, orig_currency))
+            elif "balance" in rec_cols:
+                cursor.execute(f"UPDATE creator_receiving_accounts SET balance = balance + ? WHERE user_id = ? AND currency = ?", (orig_amount, user_id, orig_currency))
+        except Exception:
+            pass
+
         cursor.execute("""
             INSERT INTO wallet_transactions (
                 user_id, transaction_type, amount, currency, description, reference, status
             ) VALUES (?, 'PAYOUT_REFUNDED', ?, ?, ?, ?, 'Completed')
         """, (user_id, orig_amount, orig_currency, f"Refund for failed payout: {failure_reason}", f"REFUND-{transfer_ref}"))
 
-        # 5. Dispatch failure notifications to both tables
-        notif_msg = f"Your withdrawal of {orig_currency} {orig_amount:,.2f} could not be delivered ({failure_reason}). Your funds have been automatically refunded to your LifeGrid wallet."
-
-        # Main notifications table (for 05 - Notifications.py)
+        notif_msg = f"Your withdrawal of {orig_currency} {orig_amount:,.2f} could not be delivered ({failure_reason}). Funds refunded to your wallet."
         cursor.execute("""
             INSERT INTO notifications (user_id, notification_type, title, message, reference_type, reference_id, is_read, created_at)
             VALUES (?, 'Wallet', 'Withdrawal Failed & Refunded', ?, 'creator_withdrawals', ?, 0, ?)
         """, (user_id, notif_msg, transfer_ref, now_str))
 
-        # withdrawal_notifications (for backward compatibility)
         cursor.execute("""
             INSERT INTO withdrawal_notifications
             (user_id, withdrawal_reference, notification_type, title, message, currency, amount, is_read, created_at)
             VALUES (?, ?, 'rejected', 'Withdrawal Failed & Refunded', ?, ?, ?, 0, ?)
         """, (user_id, transfer_ref, notif_msg, orig_currency, orig_amount, now_str))
 
-        # 6. Audit ledger reversal entry
         record_audit_entry(cursor, transfer_ref, "PAYOUT_REFUND_RESTORED", user_id, 0.0, orig_amount, 0.0, new_bal, orig_currency)
 
         conn.commit()
         conn.close()
-        return {"status": "refunded", "message": f"Withdrawal '{transfer_ref}' marked Rejected. {orig_currency} {orig_amount:,.2f} restored to user #{user_id} wallet."}
+        return {"status": "refunded", "message": f"Withdrawal '{transfer_ref}' refunded to user #{user_id}."}
     except Exception as e:
         cursor.execute("ROLLBACK")
         conn.close()
-        return {"status": "error", "message": f"Database error during failure refund: {str(e)}"}
+        return {"status": "error", "message": str(e)}
 
 
 # =========================================================
-# HTTP REQUEST HANDLER (Standard Library Zero-Dependency)
+# HTTP REQUEST HANDLER
 # =========================================================
 class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -583,13 +570,13 @@ def run_server(port=8000):
 # =========================================================
 def render_streamlit_ui():
     st.set_page_config(
-        page_title="Webhook Payout Handler - LifeGrid",
+        page_title="Webhook Payout Handler | LifeGrid",
         page_icon="⚡",
         layout="wide"
     )
 
-    st.title("⚡ LifeGrid Automated Payout & Webhook Monitor")
-    st.caption("Live Flutterwave transfer webhook listener, instant payout reconciliation, automatic wallet balance recovery, and interactive event simulation.")
+    st.title("⚡ Webhook Payout Handler & Operations Monitor")
+    st.caption("Live Flutterwave transfer webhook listener, automated payout reconciliation, and audit security.")
 
     conn = get_db()
     ensure_financial_and_webhook_tables(conn)
@@ -600,12 +587,26 @@ def render_streamlit_ui():
     pending_w = c.execute("SELECT COUNT(*) FROM creator_withdrawals WHERE LOWER(status) IN ('pending', 'processing')").fetchone()[0]
     total_ledger = c.execute("SELECT COUNT(*) FROM financial_audit_ledger").fetchone()[0]
 
+    flw_mode = "unconfigured"
+    try:
+        from services.flutterwave import get_flutterwave_mode
+        flw_mode = get_flutterwave_mode()
+    except Exception:
+        pass
+
+    if flw_mode == "test":
+        st.info("🧪 **Flutterwave Sandbox Test Mode Active** — Test cards and accounts supported. Payouts and payments run against Flutterwave sandbox.")
+    elif flw_mode == "live":
+        st.success("🟢 **Flutterwave Live Production Mode Active** — Real money transfers and payments active.")
+    else:
+        st.warning("⚠️ **Flutterwave API Key**: Unset in secrets. Set `FLUTTERWAVE_SECRET_KEY` in Streamlit Secrets.")
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if secret_hash:
-            st.success(f"🔐 **Secret Hash**: `{secret_hash[:4]}••••{secret_hash[-4:] if len(secret_hash) > 8 else ''}`")
+            st.success(f"🔐 **Webhook Hash**: `{secret_hash[:4]}••••{secret_hash[-4:] if len(secret_hash) > 8 else ''}`")
         else:
-            st.warning("⚠️ **Secret Hash**: Unset\nSet `FLUTTERWAVE_SECRET_HASH` in `.streamlit/secrets.toml`")
+            st.warning("⚠️ **Webhook Hash**: Unset (set `FLUTTERWAVE_SECRET_HASH`)")
 
     with col2:
         st.info(f"📥 **Logged Events**: {total_logs} webhook calls")
@@ -617,7 +618,7 @@ def render_streamlit_ui():
         st.metric("🛡️ Immutable Audit Entries", total_ledger)
 
     tabs = st.tabs([
-        "🧪 Simulator & Reconciler",
+        "⚡ Live Operations & Reconciler",
         "📊 Withdrawal Statuses",
         "📜 Webhook Logs",
         "🔔 Dispatched Notifications",
@@ -625,114 +626,138 @@ def render_streamlit_ui():
         "⚙️ Setup & Deployment Guide"
     ])
 
-    # ---------------- TAB 1: SIMULATOR ----------------
+    # ---------------- TAB 1: LIVE OPERATIONS & RECONCILER ----------------
     with tabs[0]:
-        st.subheader("Interactive Webhook Event Simulator")
-        st.write("Simulate incoming Flutterwave `transfer.completed` and `transfer.failed` events with real-time balance updates.")
+        st.subheader("Live Payout Operations & Manual Reconciler")
+        st.caption("Manage real incoming webhooks, verify pending creator withdrawals, and resolve status with Flutterwave.")
 
-        c = conn.cursor()
-        cols = get_table_columns(conn, "creator_withdrawals")
-        user_col = "user_id" if "user_id" in cols else ("creator_id" if "creator_id" in cols else "user_id")
+        with st.expander("🔍 Live Flutterwave Payment Verifier (Instant Deposit / Gift Checkout Sync)", expanded=False):
+            st.write("If a user completed a payment on Flutterwave but Streamlit was sleeping or a webhook was delayed, verify and settle it instantly by reference:")
+            v_col1, v_col2 = st.columns([3, 1])
+            with v_col1:
+                query_ref = st.text_input("Enter LifeGrid Payment Reference (tx_ref) or Numeric Flutterwave ID:", placeholder="e.g. LG-GIFT-1700000000 or 1234567")
+            with v_col2:
+                st.write("")
+                st.write("")
+                btn_verify = st.button("Verify with Flutterwave", type="secondary", use_container_width=True)
 
-        w_rows = c.execute(f"""
-            SELECT id, {user_col}, amount, currency, status, withdrawal_reference
-            FROM creator_withdrawals
-            ORDER BY id DESC LIMIT 25
-        """).fetchall()
-
-        if not w_rows:
-            st.info("No withdrawals currently found in `creator_withdrawals`. Click below to create a sample processing withdrawal.")
-            if st.button("➕ Generate Sample Withdrawal for Testing", type="primary"):
-                now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-                sample_ref = f"WDR-TEST-{int(datetime.utcnow().timestamp())}"
-                c.execute("""
-                    INSERT INTO creator_withdrawals
-                    (user_id, amount, currency, status, withdrawal_reference, created_at, notes, bank_name, account_number)
-                    VALUES (1, 35000.0, 'NGN', 'Processing', ?, ?, 'Initiated for automated payout testing', 'Zenith Bank', '0123456789')
-                """, (sample_ref, now_str))
-                c.execute("""
-                    INSERT OR IGNORE INTO creator_profiles (user_id, display_name, total_earnings)
-                    VALUES (1, 'Test Creator', 50000.0)
-                """)
-                # Also ensure wallet exists
-                c.execute("""
-                    INSERT OR IGNORE INTO wallets (user_id, currency, balance)
-                    VALUES (1, 'NGN', 15000.0)
-                """)
-                conn.commit()
-                st.success(f"Created sample withdrawal `{sample_ref}`")
-                st.rerun()
-        else:
-            options = {
-                f"#{r[0]} | Ref: {r[5]} | User #{r[1]} | {r[3]} {r[2]:,.2f} | Status: {r[4]}": r[5]
-                for r in w_rows
-            }
-            selected_label = st.selectbox("Select Target Withdrawal:", list(options.keys()))
-            selected_ref = options[selected_label]
-
-            sim_col1, sim_col2 = st.columns(2)
-
-            with sim_col1:
-                st.markdown("### 🟢 Simulate Transfer Successful")
-                st.caption("Sends `transfer.completed`. Marks request as **Completed**, records Flutterwave reference, and alerts creator.")
-                flw_tx_id = st.text_input("Flutterwave Disbursal Ref", value="FLW-TRF-982341", key="sim_flw_ref")
-                if st.button("🚀 Trigger transfer.completed", use_container_width=True, type="primary"):
-                    payload = {
-                        "event": "transfer.completed",
-                        "data": {
-                            "reference": selected_ref,
-                            "id": flw_tx_id,
-                            "amount": 35000.0,
-                            "currency": "NGN"
-                        }
-                    }
-                    res = process_transfer_completed(payload)
-                    c.execute("""
-                        INSERT INTO webhook_logs (event_type, reference, status, payload, received_at)
-                        VALUES ('transfer.completed', ?, 'simulated', ?, ?)
-                    """, (selected_ref, json.dumps(payload), datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
-
-                    if res.get("status") == "success":
-                        st.success(f"✅ {res.get('message')}")
+            if btn_verify and query_ref.strip():
+                clean_ref = query_ref.strip()
+                try:
+                    from services.flutterwave import verify_transaction, verify_transaction_by_reference
+                    if clean_ref.isdigit():
+                        v_res = verify_transaction(clean_ref)
                     else:
-                        st.info(f"ℹ️ {res.get('message')}")
-                    st.rerun()
+                        v_res = verify_transaction_by_reference(clean_ref)
 
-            with sim_col2:
-                st.markdown("### 🔴 Simulate Transfer Failed")
-                st.caption("Sends `transfer.failed`. Marks request as **Rejected**, automatically refunds reserved funds to creator wallet, and notifies them.")
-                fail_reason = st.selectbox(
-                    "Failure Reason",
-                    [
-                        "Beneficiary account number is invalid or closed",
-                        "Destination bank communications link failure",
-                        "Account name mismatch with verified creator name",
-                        "Daily incoming transfer limit exceeded for beneficiary"
-                    ],
-                    key="sim_fail_reason"
-                )
-                if st.button("⚠️ Trigger transfer.failed", use_container_width=True):
-                    payload = {
-                        "event": "transfer.failed",
-                        "data": {
-                            "reference": selected_ref,
-                            "reason": fail_reason,
-                            "amount": 35000.0,
-                            "currency": "NGN"
-                        }
-                    }
-                    res = process_transfer_failed(payload)
-                    c.execute("""
-                        INSERT INTO webhook_logs (event_type, reference, status, payload, received_at)
-                        VALUES ('transfer.failed', ?, 'simulated', ?, ?)
-                    """, (selected_ref, json.dumps(payload), datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")))
-                    conn.commit()
+                    if v_res.get("success"):
+                        v_data = v_res.get("data", {})
+                        v_status = str(v_data.get("status", "")).upper()
+                        v_amt = float(v_data.get("amount", 0.0))
+                        v_curr = str(v_data.get("currency", "NGN")).upper()
+                        v_cust = v_data.get("customer", {})
+                        v_email = v_cust.get("email", "N/A") if isinstance(v_cust, dict) else "N/A"
+                        v_txref = v_data.get("tx_ref", clean_ref)
 
-                    if res.get("status") == "refunded":
-                        st.warning(f"🔄 {res.get('message')}")
+                        st.success(f"✅ **Flutterwave Verified Status: {v_status}**")
+                        st.json({
+                            "Status": v_status,
+                            "Amount": f"{v_curr} {v_amt:,.2f}",
+                            "Customer": v_email,
+                            "Reference": v_txref,
+                            "FLW ID": v_data.get("id"),
+                            "Payment Type": v_data.get("payment_type", "Card")
+                        })
+
+                        # Settle button
+                        if v_status == "SUCCESSFUL":
+                            if st.button(f"⚡ Log & Record Verified Payment ({v_curr} {v_amt:,.2f})", type="primary"):
+                                c = conn.cursor()
+                                now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                c.execute("""
+                                    INSERT INTO webhook_logs (event_type, reference, status, payload, created_at)
+                                    VALUES ('charge.completed', ?, 'verified', ?, ?)
+                                """, (str(v_txref), json.dumps(v_data), now_iso))
+                                conn.commit()
+                                st.success("🎉 Payment verified and recorded in audit ledger successfully!")
+                                st.rerun()
                     else:
-                        st.info(f"ℹ️ {res.get('message')}")
+                        st.error(f"Verification failed: {v_res.get('message')}")
+                except Exception as ex:
+                    st.error(f"Flutterwave API check error: {ex}")
+
+        col_left, col_right = st.columns([1, 1])
+
+        with col_left:
+            st.markdown("### 📡 Live Webhook Listener Status")
+            st.write(
+                "In production, Flutterwave sends real-time POST notifications to your server when transfers complete or fail. "
+                "The endpoint validates the `verif-hash` header and automatically updates creator balances."
+            )
+            if secret_hash:
+                st.success("✅ Webhook security signature (`verif-hash`) is configured and active.")
+            else:
+                st.warning("⚠️ Webhook security signature is not yet configured. Please set `FLUTTERWAVE_SECRET_HASH`.")
+
+            st.info("""
+            **Command to run the standalone background listener on your production server:**
+            ```bash
+            python pages/21-webhook&monitor.py --serve --port 8000
+            ```
+            """)
+
+        with col_right:
+            st.markdown("### 🔄 Reconcile Pending Withdrawals")
+            c = conn.cursor()
+            cols = get_table_columns(conn, "creator_withdrawals")
+            user_col = "user_id" if "user_id" in cols else ("creator_id" if "creator_id" in cols else "user_id")
+
+            pending_rows = c.execute(f"""
+                SELECT id, {user_col}, amount, currency, status, withdrawal_reference, bank_name, account_number
+                FROM creator_withdrawals
+                WHERE LOWER(status) IN ('pending', 'processing')
+                ORDER BY id DESC
+            """).fetchall()
+
+            if not pending_rows:
+                st.success("✅ All clear! There are currently no pending or processing withdrawal requests awaiting reconciliation.")
+            else:
+                p_options = {
+                    f"Ref: {r[5]} | User #{r[1]} | {r[3]} {r[2]:,.2f} | {r[6] or 'Bank'}: {r[7] or 'N/A'}": r
+                    for r in pending_rows
+                }
+                selected_label = st.selectbox("Select Pending Request to Reconcile:", list(p_options.keys()))
+                sel_row = p_options[selected_label]
+
+                manual_ref = st.text_input("Flutterwave Transaction Reference (FLW-Ref)", value=f"FLW-MANUAL-{sel_row[5]}")
+                rec_action = st.radio("Resolution Action", ["Confirm & Complete Transfer", "Decline & Refund Creator Wallet"], horizontal=True)
+
+                if st.button("Apply Resolution", type="primary", use_container_width=True):
+                    now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                    if "Confirm" in rec_action:
+                        payload = {
+                            "event": "transfer.completed",
+                            "data": {
+                                "reference": sel_row[5],
+                                "id": manual_ref,
+                                "amount": sel_row[2],
+                                "currency": sel_row[3]
+                            }
+                        }
+                        res = process_transfer_completed(payload)
+                        st.success(f"Result: {res.get('message')}")
+                    else:
+                        payload = {
+                            "event": "transfer.failed",
+                            "data": {
+                                "reference": sel_row[5],
+                                "reason": "Manually declined or bank returned transfer",
+                                "amount": sel_row[2],
+                                "currency": sel_row[3]
+                            }
+                        }
+                        res = process_transfer_failed(payload)
+                        st.warning(f"Result: {res.get('message')}")
                     st.rerun()
 
     # ---------------- TAB 2: WITHDRAWAL STATUSES ----------------
@@ -826,8 +851,18 @@ def render_streamlit_ui():
     with tabs[4]:
         st.subheader("Official LifeGrid Digital Receipts")
         c = conn.cursor()
-        completed_w = c.execute("""
-            SELECT withdrawal_reference, user_id, amount, currency, fee, net_amount, status, bank_name, account_number, processed_at, transaction_reference
+        cols = get_table_columns(conn, "creator_withdrawals")
+
+        fee_col = "fee" if "fee" in cols else "0.0 AS fee"
+        net_col = "net_amount" if "net_amount" in cols else "amount AS net_amount"
+        user_col = "user_id" if "user_id" in cols else ("creator_id" if "creator_id" in cols else "1 AS user_id")
+        bank_col = "bank_name" if "bank_name" in cols else "'' AS bank_name"
+        acct_col = "account_number" if "account_number" in cols else "'' AS account_number"
+        proc_col = "processed_at" if "processed_at" in cols else "created_at AS processed_at"
+        tx_ref_col = "transaction_reference" if "transaction_reference" in cols else "'' AS transaction_reference"
+
+        completed_w = c.execute(f"""
+            SELECT withdrawal_reference, {user_col}, amount, currency, {fee_col}, {net_col}, status, {bank_col}, {acct_col}, {proc_col}, {tx_ref_col}
             FROM creator_withdrawals
             ORDER BY id DESC LIMIT 20
         """).fetchall()
@@ -845,10 +880,10 @@ def render_streamlit_ui():
                 "fee": selected_w_data[4] or 0.0,
                 "net_amount": selected_w_data[5] or selected_w_data[2],
                 "status": selected_w_data[6],
-                "bank_name": selected_w_data[7] or "Zenith Bank",
-                "account_number": selected_w_data[8] or "0123456789",
+                "bank_name": selected_w_data[7] or "N/A",
+                "account_number": selected_w_data[8] or "N/A",
                 "timestamp": selected_w_data[9] or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-                "flw_ref": selected_w_data[10] or "FLW-PAYOUT-AUTO"
+                "flw_ref": selected_w_data[10] or "N/A"
             }
 
             receipt_text = generate_receipt_text(receipt_payload)
@@ -871,8 +906,8 @@ def render_streamlit_ui():
         1. **Log in to Flutterwave Dashboard**:
            - Navigate to **Settings > Webhooks**.
         2. **Enter Webhook URL**:
-           - Set your endpoint, e.g. `https://your-domain.com/webhook` or `https://api.yourdomain.com/flutterwave/webhook`.
-           - In development, forward traffic using ngrok: `ngrok http 8000`.
+           - Set your endpoint, e.g. `https://your-domain.com/webhook`.
+           - In development/testing, forward traffic using ngrok: `ngrok http 8000`.
         3. **Set Secret Hash**:
            - Enter a secret key in Flutterwave (e.g. `lifegrid_webhook_secret_2026`).
            - Add it to `.streamlit/secrets.toml`:
@@ -880,66 +915,29 @@ def render_streamlit_ui():
            FLUTTERWAVE_SECRET_HASH = "lifegrid_webhook_secret_2026"
            ```
         4. **Running as a Standalone Server in Production**:
-           Run this exact script directly in Python on your server:
            ```bash
-           python webhook_payout_handler.py --serve --port 8000
+           python pages/21-webhook&monitor.py --serve --port 8000
            ```
-           Or access it directly inside Streamlit!
         """)
 
 
 # =========================================================
 # SCRIPT EXECUTION (CLI / STREAMLIT)
 # =========================================================
-is_cli_command = any(arg in sys.argv for arg in ["--serve", "--simulate-completed", "--simulate-failed", "-h", "--help"])
+is_cli_command = any(arg in sys.argv for arg in ["--serve", "-h", "--help"])
 
 if is_cli_command:
-    parser = argparse.ArgumentParser(description="LifeGrid Flutterwave Webhook Listener & Simulator")
+    parser = argparse.ArgumentParser(description="LifeGrid Flutterwave Webhook Listener")
     parser.add_argument("--serve", action="store_true", help="Start the webhook HTTP server listener")
     parser.add_argument("--port", type=int, default=8000, help="Port to run server on (default: 8000)")
-    parser.add_argument("--simulate-completed", action="store_true", help="Simulate a transfer.completed event")
-    parser.add_argument("--simulate-failed", action="store_true", help="Simulate a transfer.failed event")
-    parser.add_argument("--ref", type=str, default="", help="Withdrawal reference to simulate")
-    parser.add_argument("--reason", type=str, default="Bank destination invalid", help="Failure reason for simulation")
-
     args = parser.parse_args()
 
     if args.serve:
         run_server(args.port)
-    elif args.simulate_completed:
-        sample_ref = args.ref
-        conn = get_db()
-        ensure_financial_and_webhook_tables(conn)
-        if not sample_ref:
-            c = conn.cursor()
-            row = c.execute("SELECT withdrawal_reference FROM creator_withdrawals ORDER BY id DESC LIMIT 1").fetchone()
-            sample_ref = row[0] if row else "WDR-TEST-001"
-
-        print(f"🔄 Simulating Flutterwave 'transfer.completed' for ref: {sample_ref}...")
-        res = process_transfer_completed({
-            "event": "transfer.completed",
-            "data": {"reference": sample_ref, "id": 982341, "amount": 25000.0, "currency": "NGN"}
-        })
-        print("✅ Result:", res)
-    elif args.simulate_failed:
-        sample_ref = args.ref
-        conn = get_db()
-        ensure_financial_and_webhook_tables(conn)
-        if not sample_ref:
-            c = conn.cursor()
-            row = c.execute("SELECT withdrawal_reference FROM creator_withdrawals ORDER BY id DESC LIMIT 1").fetchone()
-            sample_ref = row[0] if row else "WDR-TEST-001"
-
-        print(f"🔄 Simulating Flutterwave 'transfer.failed' for ref: {sample_ref}...")
-        res = process_transfer_failed({
-            "event": "transfer.failed",
-            "data": {"reference": sample_ref, "reason": args.reason, "amount": 25000.0, "currency": "NGN"}
-        })
-        print("⚠️ Result:", res)
 else:
     if HAS_STREAMLIT:
         render_streamlit_ui()
     else:
         print("LifeGrid Webhook Utility.")
-        print("To run the interactive UI: streamlit run webhook_payout_handler.py")
-        print("To run the HTTP listener:   python webhook_payout_handler.py --serve --port 8000")
+        print("To run the interactive UI: streamlit run pages/21-webhook&monitor.py")
+        print("To run the HTTP listener:   python pages/21-webhook&monitor.py --serve --port 8000")

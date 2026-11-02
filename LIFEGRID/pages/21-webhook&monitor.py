@@ -61,13 +61,14 @@ def get_secret_hash():
 
 
 def get_db():
-    """Connect to SQLite database with robust concurrency settings."""
-    try:
-        from database import get_connection
-        return get_connection()
-    except Exception:
-        db_path = os.environ.get("LIFEGRID_DB_PATH", "lifegrid.db")
-        return sqlite3.connect(db_path, check_same_thread=False)
+    """Connect to unified LifeGrid database (Turso libSQL or local)."""
+    import sys
+    from pathlib import Path
+    root_dir = Path(__file__).resolve().parent.parent
+    if str(root_dir) not in sys.path:
+        sys.path.insert(0, str(root_dir))
+    from database import get_connection
+    return get_connection()
 
 
 def get_table_columns(conn, table_name):
@@ -586,12 +587,26 @@ def render_streamlit_ui():
     pending_w = c.execute("SELECT COUNT(*) FROM creator_withdrawals WHERE LOWER(status) IN ('pending', 'processing')").fetchone()[0]
     total_ledger = c.execute("SELECT COUNT(*) FROM financial_audit_ledger").fetchone()[0]
 
+    flw_mode = "unconfigured"
+    try:
+        from services.flutterwave import get_flutterwave_mode
+        flw_mode = get_flutterwave_mode()
+    except Exception:
+        pass
+
+    if flw_mode == "test":
+        st.info("🧪 **Flutterwave Sandbox Test Mode Active** — Test cards and accounts supported. Payouts and payments run against Flutterwave sandbox.")
+    elif flw_mode == "live":
+        st.success("🟢 **Flutterwave Live Production Mode Active** — Real money transfers and payments active.")
+    else:
+        st.warning("⚠️ **Flutterwave API Key**: Unset in secrets. Set `FLUTTERWAVE_SECRET_KEY` in Streamlit Secrets.")
+
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if secret_hash:
-            st.success(f"🔐 **Secret Hash**: `{secret_hash[:4]}••••{secret_hash[-4:] if len(secret_hash) > 8 else ''}`")
+            st.success(f"🔐 **Webhook Hash**: `{secret_hash[:4]}••••{secret_hash[-4:] if len(secret_hash) > 8 else ''}`")
         else:
-            st.warning("⚠️ **Secret Hash**: Unset\nSet `FLUTTERWAVE_SECRET_HASH` in `.streamlit/secrets.toml`")
+            st.warning("⚠️ **Webhook Hash**: Unset (set `FLUTTERWAVE_SECRET_HASH`)")
 
     with col2:
         st.info(f"📥 **Logged Events**: {total_logs} webhook calls")
@@ -615,6 +630,61 @@ def render_streamlit_ui():
     with tabs[0]:
         st.subheader("Live Payout Operations & Manual Reconciler")
         st.caption("Manage real incoming webhooks, verify pending creator withdrawals, and resolve status with Flutterwave.")
+
+        with st.expander("🔍 Live Flutterwave Payment Verifier (Instant Deposit / Gift Checkout Sync)", expanded=False):
+            st.write("If a user completed a payment on Flutterwave but Streamlit was sleeping or a webhook was delayed, verify and settle it instantly by reference:")
+            v_col1, v_col2 = st.columns([3, 1])
+            with v_col1:
+                query_ref = st.text_input("Enter LifeGrid Payment Reference (tx_ref) or Numeric Flutterwave ID:", placeholder="e.g. LG-GIFT-1700000000 or 1234567")
+            with v_col2:
+                st.write("")
+                st.write("")
+                btn_verify = st.button("Verify with Flutterwave", type="secondary", use_container_width=True)
+
+            if btn_verify and query_ref.strip():
+                clean_ref = query_ref.strip()
+                try:
+                    from services.flutterwave import verify_transaction, verify_transaction_by_reference
+                    if clean_ref.isdigit():
+                        v_res = verify_transaction(clean_ref)
+                    else:
+                        v_res = verify_transaction_by_reference(clean_ref)
+
+                    if v_res.get("success"):
+                        v_data = v_res.get("data", {})
+                        v_status = str(v_data.get("status", "")).upper()
+                        v_amt = float(v_data.get("amount", 0.0))
+                        v_curr = str(v_data.get("currency", "NGN")).upper()
+                        v_cust = v_data.get("customer", {})
+                        v_email = v_cust.get("email", "N/A") if isinstance(v_cust, dict) else "N/A"
+                        v_txref = v_data.get("tx_ref", clean_ref)
+
+                        st.success(f"✅ **Flutterwave Verified Status: {v_status}**")
+                        st.json({
+                            "Status": v_status,
+                            "Amount": f"{v_curr} {v_amt:,.2f}",
+                            "Customer": v_email,
+                            "Reference": v_txref,
+                            "FLW ID": v_data.get("id"),
+                            "Payment Type": v_data.get("payment_type", "Card")
+                        })
+
+                        # Settle button
+                        if v_status == "SUCCESSFUL":
+                            if st.button(f"⚡ Log & Record Verified Payment ({v_curr} {v_amt:,.2f})", type="primary"):
+                                c = conn.cursor()
+                                now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                                c.execute("""
+                                    INSERT INTO webhook_logs (event_type, reference, status, payload, created_at)
+                                    VALUES ('charge.completed', ?, 'verified', ?, ?)
+                                """, (str(v_txref), json.dumps(v_data), now_iso))
+                                conn.commit()
+                                st.success("🎉 Payment verified and recorded in audit ledger successfully!")
+                                st.rerun()
+                    else:
+                        st.error(f"Verification failed: {v_res.get('message')}")
+                except Exception as ex:
+                    st.error(f"Flutterwave API check error: {ex}")
 
         col_left, col_right = st.columns([1, 1])
 
