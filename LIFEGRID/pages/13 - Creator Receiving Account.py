@@ -43,6 +43,25 @@ def get_columns(table_name):
     except Exception:
         return set()
 
+def ensure_feature_columns(connection, table_name, definitions):
+    columns = get_columns(table_name)
+    if not columns:
+        raise RuntimeError(f"Required table {table_name} is missing")
+    for name, definition in definitions.items():
+        if name not in columns:
+            connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}")
+            columns.add(name)
+            if name == "id":
+                connection.execute(f"UPDATE {table_name} SET id = rowid WHERE id IS NULL")
+    if "id" in columns:
+        trigger_name = f"trg_{table_name}_fill_legacy_id"
+        connection.execute(
+            f"CREATE TRIGGER IF NOT EXISTS {trigger_name} "
+            f"AFTER INSERT ON {table_name} WHEN NEW.id IS NULL "
+            f"BEGIN UPDATE {table_name} SET id = NEW.rowid WHERE rowid = NEW.rowid; END"
+        )
+
+
 def ensure_core_schemas():
     connection.execute(
         """
@@ -100,6 +119,18 @@ def ensure_core_schemas():
         )
         """
     )
+    ensure_feature_columns(connection, "creator_profiles", {
+        "user_id": "INTEGER", "display_name": "TEXT", "description": "TEXT DEFAULT ''",
+        "creator_status": "TEXT DEFAULT 'active'", "total_earnings": "REAL DEFAULT 0",
+        "currency": "TEXT DEFAULT 'NGN'", "created_at": "TIMESTAMP", "updated_at": "TEXT",
+        "pending_balance": "REAL DEFAULT 0", "kyc_tier": "INTEGER DEFAULT 1",
+        "id": "INTEGER",
+    })
+    ensure_feature_columns(connection, "receiving_accounts", {
+        "user_id": "INTEGER", "receiving_id": "TEXT", "currency": "TEXT DEFAULT 'NGN'",
+        "status": "TEXT DEFAULT 'Active'", "verification_status": "TEXT DEFAULT 'Pending'",
+        "created_at": "TIMESTAMP", "id": "INTEGER",
+    })
     connection.commit()
 
     # Rebuild legacy UNIQUE(user_id) if it restricts multi-currency
