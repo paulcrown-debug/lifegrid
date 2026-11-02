@@ -33,7 +33,10 @@ def get_connection():
             import libsql_experimental as libsql
             return libsql.connect(database=TURSO_URL, auth_token=TURSO_TOKEN)
         except Exception as e:
-            print(f"[LifeGrid DB Warning] Cloud DB connection failed, falling back to local SQLite: {e}")
+            # Do not silently split production data into a separate local database.
+            raise RuntimeError(
+                "Configured Turso database connection failed; refusing to use a separate local SQLite database."
+            ) from e
 
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(DATABASE_PATH, check_same_thread=False)
@@ -52,6 +55,23 @@ def add_column_if_missing(cursor, table_name, column_name, column_definition):
             cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
     except Exception as e:
         print(f"[LifeGrid DB Migration Notice] Column check on {table_name}.{column_name}: {e}")
+
+
+def ensure_legacy_row_id(cursor, table_name):
+    """Add a stable id to legacy rowid tables without rebuilding existing rows."""
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    columns = {row[1].lower() for row in cursor.fetchall()}
+    if not columns:
+        raise RuntimeError(f"Required table {table_name} is missing")
+    if "id" not in columns:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN id INTEGER")
+    cursor.execute(f"UPDATE {table_name} SET id = rowid WHERE id IS NULL")
+    trigger_name = f"trg_{table_name}_fill_legacy_id"
+    cursor.execute(
+        f"CREATE TRIGGER IF NOT EXISTS {trigger_name} "
+        f"AFTER INSERT ON {table_name} WHEN NEW.id IS NULL "
+        f"BEGIN UPDATE {table_name} SET id = NEW.rowid WHERE rowid = NEW.rowid; END"
+    )
 
 
 # ============================================================
@@ -876,6 +896,7 @@ def initialize_database():
         add_column_if_missing(c, "wallets", "wallet_status", "TEXT DEFAULT 'Active'")
 
         # --- Receiving Accounts ---
+        add_column_if_missing(c, "receiving_accounts", "user_id", "INTEGER")
         add_column_if_missing(c, "receiving_accounts", "receiving_id", "TEXT")
         add_column_if_missing(c, "receiving_accounts", "payout_method", "TEXT DEFAULT 'bank'")
         add_column_if_missing(c, "receiving_accounts", "currency", "TEXT DEFAULT 'NGN'")
@@ -888,8 +909,12 @@ def initialize_database():
         add_column_if_missing(c, "receiving_accounts", "account_type", "TEXT DEFAULT 'internal_wallet'")
         add_column_if_missing(c, "receiving_accounts", "verification_status", "TEXT DEFAULT 'Verified'")
         add_column_if_missing(c, "receiving_accounts", "status", "TEXT DEFAULT 'Active'")
+        add_column_if_missing(c, "receiving_accounts", "created_at", "TIMESTAMP")
+        add_column_if_missing(c, "receiving_accounts", "updated_at", "TIMESTAMP")
+        ensure_legacy_row_id(c, "receiving_accounts")
 
         # --- Creator Profiles ---
+        add_column_if_missing(c, "creator_profiles", "user_id", "INTEGER")
         add_column_if_missing(c, "creator_profiles", "display_name", "TEXT")
         add_column_if_missing(c, "creator_profiles", "description", "TEXT DEFAULT ''")
         add_column_if_missing(c, "creator_profiles", "creator_status", "TEXT DEFAULT 'active'")
@@ -899,6 +924,7 @@ def initialize_database():
         add_column_if_missing(c, "creator_profiles", "kyc_tier", "INTEGER DEFAULT 1")
         add_column_if_missing(c, "creator_profiles", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
         add_column_if_missing(c, "creator_profiles", "updated_at", "TEXT")
+        ensure_legacy_row_id(c, "creator_profiles")
 
         # --- Creator Withdrawals ---
         add_column_if_missing(c, "creator_withdrawals", "fee", "REAL DEFAULT 0.0")
