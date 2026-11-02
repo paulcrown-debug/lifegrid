@@ -33,18 +33,54 @@ def columns(conn, table):
 
 
 def ensure_help_columns():
+    """Create/migrate Help schema without rewriting existing request data."""
     conn = get_connection()
 
     try:
-        cols = columns(conn, "help_requests")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS help_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                requester_id INTEGER,
+                helper_id INTEGER,
+                target_helper_id INTEGER,
+                title TEXT,
+                category TEXT DEFAULT 'General',
+                description TEXT,
+                help_type TEXT DEFAULT 'Other',
+                target_date DATE,
+                status TEXT DEFAULT 'Open',
+                accepted_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                confirmed_at TIMESTAMP,
+                wallet_amount REAL DEFAULT 0,
+                wallet_transfer_reference TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
 
+        cols = set(columns(conn, "help_requests"))
         additions = {
+            # Required by the Help page's request list and create flow.
+            "requester_id": "INTEGER",
+            "helper_id": "INTEGER",
+            "title": "TEXT",
+            "description": "TEXT",
+            "status": "TEXT DEFAULT 'Open'",
+            # Fields used by filters, matching, lifecycle and wallet support.
+            "user_id": "INTEGER",
             "target_helper_id": "INTEGER",
+            "category": "TEXT DEFAULT 'General'",
+            "help_type": "TEXT DEFAULT 'Other'",
+            "target_date": "DATE",
             "accepted_at": "TIMESTAMP",
             "completed_at": "TIMESTAMP",
             "confirmed_at": "TIMESTAMP",
             "wallet_amount": "REAL DEFAULT 0",
             "wallet_transfer_reference": "TEXT",
+            "created_at": "TIMESTAMP",
         }
 
         for name, typ in additions.items():
@@ -52,8 +88,21 @@ def ensure_help_columns():
                 conn.execute(
                     f"ALTER TABLE help_requests ADD COLUMN {name} {typ}"
                 )
+                cols.add(name)
+
+        required = {"id", "requester_id", "title", "description", "status"}
+        missing = sorted(required - cols)
+        if missing:
+            raise RuntimeError(
+                "Help schema migration did not provide required columns: "
+                + ", ".join(missing)
+            )
 
         conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
 
     finally:
         conn.close()
@@ -708,10 +757,12 @@ try:
     }
 
     if not required.issubset(hr_cols):
+        missing = ", ".join(sorted(required - set(hr_cols)))
         st.error(
-            "The Help database table is missing required "
-            "columns. Please restart LifeGrid after updating "
-            "the database."
+            "The Help database table is still missing required "
+            f"columns: {missing}. The schema migration could not "
+            "complete on the active database. Check the database "
+            "connection and app logs before retrying."
         )
 
         st.stop()
