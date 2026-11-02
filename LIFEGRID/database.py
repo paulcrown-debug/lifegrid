@@ -932,6 +932,8 @@ def initialize_database():
         # --- Help Requests ---
         add_column_if_missing(c, "help_requests", "requester_id", "INTEGER")
         add_column_if_missing(c, "help_requests", "helper_id", "INTEGER")
+        add_column_if_missing(c, "help_requests", "help_type", "TEXT DEFAULT 'Other'")
+        add_column_if_missing(c, "help_requests", "target_date", "DATE")
         add_column_if_missing(c, "help_requests", "target_helper_id", "INTEGER")
         add_column_if_missing(c, "help_requests", "title", "TEXT")
         add_column_if_missing(c, "help_requests", "category", "TEXT DEFAULT 'General'")
