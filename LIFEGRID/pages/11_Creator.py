@@ -348,18 +348,29 @@ connection = get_connection()
 try:
     create_tables(connection)
 
-    ensure_column(
-        connection,
-        "creator_profiles",
-        "total_earnings",
-        "REAL NOT NULL DEFAULT 0",
-    )
+    profile_columns = {
+        "user_id": "INTEGER",
+        "display_name": "TEXT",
+        "description": "TEXT DEFAULT ''",
+        "creator_status": "TEXT DEFAULT 'active'",
+        "total_earnings": "REAL NOT NULL DEFAULT 0",
+        "currency": "TEXT NOT NULL DEFAULT 'USD'",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+        "pending_balance": "REAL DEFAULT 0",
+        "kyc_tier": "INTEGER DEFAULT 1",
+    }
+    for column_name, definition in profile_columns.items():
+        ensure_column(connection, "creator_profiles", column_name, definition)
 
-    ensure_column(
-        connection,
-        "creator_profiles",
-        "currency",
-        "TEXT NOT NULL DEFAULT 'USD'",
+    profile_columns_now = table_columns(connection, "creator_profiles")
+    if "id" not in profile_columns_now:
+        connection.execute("ALTER TABLE creator_profiles ADD COLUMN id INTEGER")
+        connection.execute("UPDATE creator_profiles SET id = rowid WHERE id IS NULL")
+    connection.execute(
+        "CREATE TRIGGER IF NOT EXISTS trg_creator_profiles_fill_legacy_id "
+        "AFTER INSERT ON creator_profiles WHEN NEW.id IS NULL "
+        "BEGIN UPDATE creator_profiles SET id = NEW.rowid WHERE rowid = NEW.rowid; END"
     )
 
     connection.commit()
