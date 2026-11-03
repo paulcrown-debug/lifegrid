@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lifegrid-webhook-service
+    env: python
+    buildCommand: pip install -r LIFEGRID/requirements.txt
+    startCommand: python LIFEGRID/webhook_service.py
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: FLW_SECRET_KEY
+        sync: false
+      - key: FLW_WEBHOOK_SECRET_HASH
+        sync: false

@@ -6,6 +6,20 @@ import streamlit as st
 
 from database import get_connection
 
+try:
+    from services.crypto_gateway import (
+        SUPPORTED_CRYPTO_CURRENCIES,
+        create_crypto_deposit_order,
+        verify_crypto_deposit_status,
+        get_crypto_gateway_mode,
+        is_crypto_gateway_configured,
+    )
+except Exception:
+    SUPPORTED_CRYPTO_CURRENCIES = {}
+    def is_crypto_gateway_configured(): return False
+    def get_crypto_gateway_mode(): return "Sandbox"
+
+
 
 # =========================================================
 # PAGE CONFIGURATION
@@ -1820,6 +1834,74 @@ if add_transaction:
 
 st.divider()
 
+
+# =========================================================
+# CRYPTO DEPOSIT & BLOCKCHAIN GATEWAY
+# =========================================================
+
+st.subheader("🪙 Deposit Cryptocurrency (USDT, BTC, ETH, USDC)")
+
+crypto_gw_mode = get_crypto_gateway_mode()
+if crypto_gw_mode == "Production":
+    st.success("🟢 **Live Crypto Gateway Active:** Real on-chain deposits are enabled.")
+else:
+    st.info("ℹ️ **Crypto Gateway Mode:** Sandbox / Demo. Configure `NOWPAYMENTS_API_KEY` in secrets to switch to live blockchain network.")
+
+with st.expander("📥 Generate Crypto Deposit Address", expanded=True):
+    dep_col1, dep_col2 = st.columns([2, 1])
+    with dep_col1:
+        deposit_asset_key = st.selectbox(
+            "Select Crypto Asset & Network:",
+            options=list(SUPPORTED_CRYPTO_CURRENCIES.keys()) if SUPPORTED_CRYPTO_CURRENCIES else ["USDT_TRC20"],
+            format_func=lambda k: SUPPORTED_CRYPTO_CURRENCIES.get(k, {}).get("display_name", k) if SUPPORTED_CRYPTO_CURRENCIES else k
+        )
+    with dep_col2:
+        deposit_usd_val = st.number_input(
+            "Deposit Amount (USD Equivalent):",
+            min_value=5.0,
+            value=50.0,
+            step=10.0,
+            format="%.2f"
+        )
+
+    if st.button("Generate Deposit Address", type="primary", use_container_width=True):
+        conn = get_connection()
+        dep_res = create_crypto_deposit_order(
+            user_id=user_id,
+            asset_key=deposit_asset_key,
+            amount_usd=deposit_usd_val,
+            connection=conn
+        )
+        conn.close()
+        if dep_res.get("success"):
+            st.session_state["active_crypto_dep"] = dep_res
+            st.success(f"Deposit order generated! Reference: `{dep_res['reference']}`")
+            st.rerun()
+
+    active_dep = st.session_state.get("active_crypto_dep")
+    if active_dep:
+        st.markdown("---")
+        st.write(f"### 📍 Deposit Destination for {active_dep['asset_code']} ({active_dep['network']})")
+        st.warning(f"⚠️ Send **ONLY {active_dep['asset_code']}** via **{active_dep['network']}** to this address. Sending any other token or network may cause permanent loss.")
+
+        addr_col1, addr_col2 = st.columns([3, 1])
+        with addr_col1:
+            st.code(active_dep["deposit_address"], language="text")
+            st.caption(f"Send exactly: **{active_dep['pay_amount']} {active_dep['asset_code']}**")
+        with addr_col2:
+            st.write("")
+            if st.button("🔍 Verify Deposit Status", type="primary", use_container_width=True):
+                conn = get_connection()
+                ok, msg = verify_crypto_deposit_status(active_dep["reference"], conn)
+                conn.close()
+                if ok:
+                    st.success(f"✅ {msg}")
+                    st.session_state.pop("active_crypto_dep", None)
+                    st.rerun()
+                else:
+                    st.info(f"⏳ {msg}")
+
+st.divider()
 
 # =========================================================
 # CRYPTO TEST BALANCE

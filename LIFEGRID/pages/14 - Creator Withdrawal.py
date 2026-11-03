@@ -382,6 +382,193 @@ TIERED_PAYOUT_POLICY = {
             "tier_label": "Tier 2 (KYC Verified)",
         },
     },
+    "KES": {
+        "symbol": "KSh ",
+        "standard": {
+            "min": Decimal("1000.00"),
+            "max": Decimal("500000.00"),
+            "daily_cap": Decimal("1500000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("1000.00"),
+            "max": Decimal("10000000.00"),
+            "daily_cap": Decimal("25000000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "GHS": {
+        "symbol": "GH₵ ",
+        "standard": {
+            "min": Decimal("100.00"),
+            "max": Decimal("50000.00"),
+            "daily_cap": Decimal("150000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("100.00"),
+            "max": Decimal("1000000.00"),
+            "daily_cap": Decimal("2500000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "EUR": {
+        "symbol": "€",
+        "standard": {
+            "min": Decimal("10.00"),
+            "max": Decimal("5000.00"),
+            "daily_cap": Decimal("15000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("10.00"),
+            "max": Decimal("100000.00"),
+            "daily_cap": Decimal("250000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "GBP": {
+        "symbol": "£",
+        "standard": {
+            "min": Decimal("10.00"),
+            "max": Decimal("4000.00"),
+            "daily_cap": Decimal("12000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("10.00"),
+            "max": Decimal("80000.00"),
+            "daily_cap": Decimal("200000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "CAD": {
+        "symbol": "C$",
+        "standard": {
+            "min": Decimal("15.00"),
+            "max": Decimal("7000.00"),
+            "daily_cap": Decimal("20000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("15.00"),
+            "max": Decimal("130000.00"),
+            "daily_cap": Decimal("350000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "AUD": {
+        "symbol": "A$",
+        "standard": {
+            "min": Decimal("15.00"),
+            "max": Decimal("7500.00"),
+            "daily_cap": Decimal("22000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("15.00"),
+            "max": Decimal("150000.00"),
+            "daily_cap": Decimal("400000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "ZAR": {
+        "symbol": "R ",
+        "standard": {
+            "min": Decimal("200.00"),
+            "max": Decimal("80000.00"),
+            "daily_cap": Decimal("250000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("200.00"),
+            "max": Decimal("1500000.00"),
+            "daily_cap": Decimal("4000000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "USDT": {
+        "symbol": "USDT ",
+        "standard": {
+            "min": Decimal("10.00"),
+            "max": Decimal("5000.00"),
+            "daily_cap": Decimal("15000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("10.00"),
+            "max": Decimal("100000.00"),
+            "daily_cap": Decimal("250000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "USDC": {
+        "symbol": "USDC ",
+        "standard": {
+            "min": Decimal("10.00"),
+            "max": Decimal("5000.00"),
+            "daily_cap": Decimal("15000.00"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("10.00"),
+            "max": Decimal("100000.00"),
+            "daily_cap": Decimal("250000.00"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "BTC": {
+        "symbol": "₿ ",
+        "standard": {
+            "min": Decimal("0.0005"),
+            "max": Decimal("0.1000"),
+            "daily_cap": Decimal("0.3000"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("0.0005"),
+            "max": Decimal("2.0000"),
+            "daily_cap": Decimal("5.0000"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
+    "ETH": {
+        "symbol": "Ξ ",
+        "standard": {
+            "min": Decimal("0.0050"),
+            "max": Decimal("2.0000"),
+            "daily_cap": Decimal("6.0000"),
+            "max_daily_requests": 5,
+            "tier_label": "Tier 1 (Standard)",
+        },
+        "verified": {
+            "min": Decimal("0.0050"),
+            "max": Decimal("40.0000"),
+            "daily_cap": Decimal("100.0000"),
+            "max_daily_requests": 15,
+            "tier_label": "Tier 2 (KYC Verified)",
+        },
+    },
     "DEFAULT": {
         "symbol": "",
         "standard": {
@@ -1058,35 +1245,76 @@ st.info(
 # RECEIVING ACCOUNT SUMMARY
 # ============================================================
 
-st.subheader("🏦 Creator Receiving Account")
+st.subheader("🏦 Creator Receiving Account & Multi-Currency Switcher")
 
-if len(receiving_accounts) == 1:
-    selected_account = receiving_accounts[0]
-else:
-    def format_acc_label(acc):
-        cur = str(acc[3] or creator_currency).upper()
-        rec_id = str(acc[2])
-        status = str(acc[4] or "Active")
-        verif = str(acc[5] or "Pending")
-        return f"{rec_id} — {cur} (Status: {status} | Verification: {verif})"
+SUPPORTED_WITHDRAWAL_CURRENCIES = [
+    "USD", "NGN", "KES", "GHS", "EUR", "GBP", "CAD", "AUD", "ZAR", "USDT"
+]
 
-    selected_account = st.selectbox(
-        "Select Receiving Account / Currency",
-        options=receiving_accounts,
-        format_func=format_acc_label,
+CURRENCY_DISPLAY_NAMES = {
+    "USD": "$ USD — United States Dollar",
+    "NGN": "₦ NGN — Nigerian Naira",
+    "KES": "KSh KES — Kenyan Shilling",
+    "GHS": "GH₵ GHS — Ghanaian Cedi",
+    "EUR": "€ EUR — Euro",
+    "GBP": "£ GBP — British Pound",
+    "CAD": "C$ CAD — Canadian Dollar",
+    "AUD": "A$ AUD — Australian Dollar",
+    "ZAR": "R ZAR — South African Rand",
+    "USDT": "USDT — Tether USD",
+}
+
+# Determine default currency from user / creator profile or existing session
+active_default_curr = st.session_state.get("selected_currency") or creator_currency
+if active_default_curr not in SUPPORTED_WITHDRAWAL_CURRENCIES:
+    active_default_curr = "USD"
+
+default_idx = SUPPORTED_WITHDRAWAL_CURRENCIES.index(active_default_curr) if active_default_curr in SUPPORTED_WITHDRAWAL_CURRENCIES else 0
+
+selected_withdrawal_currency = st.selectbox(
+    "💱 Select Withdrawal Currency:",
+    options=SUPPORTED_WITHDRAWAL_CURRENCIES,
+    index=default_idx,
+    format_func=lambda c: CURRENCY_DISPLAY_NAMES.get(c, c),
+    help="Switching currency lets you view and withdraw funds in any supported fiat currency or stablecoin."
+)
+
+st.session_state["selected_currency"] = selected_withdrawal_currency
+st.session_state["user_currency"] = selected_withdrawal_currency
+
+# Find or auto-provision receiving account for this selected currency
+existing_acc = None
+for acc in receiving_accounts:
+    if str(acc[3] or "").upper() == selected_withdrawal_currency:
+        existing_acc = acc
+        break
+
+if not existing_acc:
+    # Auto-provision receiving account for this currency
+    new_rec_id = f"LG-{uuid.uuid4().hex[:8].upper()}"
+    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    connection.execute(
+        """
+        INSERT INTO receiving_accounts (user_id, receiving_id, currency, status, verification_status, created_at)
+        VALUES (?, ?, ?, 'Active', 'Verified', ?)
+        """,
+        (user_id, new_rec_id, selected_withdrawal_currency, now_ts),
     )
+    connection.commit()
+    # Refresh receiving accounts list
+    receiving_accounts = get_receiving_accounts()
+    for acc in receiving_accounts:
+        if str(acc[3] or "").upper() == selected_withdrawal_currency:
+            existing_acc = acc
+            break
 
-receiving_account_id = selected_account[0]
-receiving_id = str(selected_account[2])
-receiving_currency = str(
-    selected_account[3] or creator_currency
-).upper()
-receiving_status = str(
-    selected_account[4] or "Active"
-)
-verification_status = str(
-    selected_account[5] or "Pending"
-)
+selected_account = existing_acc or (receiving_accounts[0] if receiving_accounts else None)
+
+receiving_account_id = selected_account[0] if selected_account else 0
+receiving_id = str(selected_account[2]) if selected_account else f"LG-{user_id:08d}"
+receiving_currency = str(selected_account[3] or selected_withdrawal_currency).upper()
+receiving_status = str(selected_account[4] or "Active")
+verification_status = str(selected_account[5] or "Verified")
 
 info1, info2, info3, info4 = st.columns(4)
 
@@ -1448,17 +1676,69 @@ else:
                         placeholder="Bank Name, 10-digit Account Number, Account Name",
                     )
             elif receiving_currency == "USD":
-                st.caption("USD Payout / Domiciliary Wire Transfer Details")
+                st.caption("USD Payout / Wire / Domiciliary Transfer Details")
                 usd_col1, usd_col2 = st.columns(2)
                 with usd_col1:
-                    usd_bank = st.text_input("Bank Name", placeholder="e.g. GTBank USD Domiciliary, Access Bank, or US Bank")
+                    usd_bank = st.text_input("Bank Name", placeholder="e.g. Chase Bank, Bank of America, or GTBank USD Domiciliary")
                     usd_acc = st.text_input("Account Number / IBAN", placeholder="e.g. 0123456789 or US12...")
                 with usd_col2:
-                    usd_swift = st.text_input("SWIFT / BIC Code", placeholder="e.g. GTBINGLAXXX")
+                    usd_swift = st.text_input("SWIFT / Routing / ABA", placeholder="e.g. 021000021 or GTBINGLAXXX")
                     usd_beneficiary = st.text_input("Beneficiary Full Name", value=creator_name)
-
-                parts = [p.strip() for p in [usd_bank, usd_acc, f"SWIFT: {usd_swift}" if usd_swift else "", usd_beneficiary] if p.strip()]
+                parts = [p.strip() for p in [usd_bank, usd_acc, f"SWIFT/Routing: {usd_swift}" if usd_swift else "", usd_beneficiary] if p.strip()]
                 destination = " | ".join(parts)
+            elif receiving_currency == "KES":
+                st.caption("Kenyan Bank or M-Pesa Mobile Money")
+                kes_type = st.radio("Kenya Payout Destination", ["Bank Account", "Safaricom M-Pesa"], horizontal=True)
+                if kes_type == "Bank Account":
+                    kes_bank = st.selectbox("Kenyan Bank", ["Equity Bank", "KCB Bank", "Co-operative Bank", "NCBA", "Absa Kenya", "Stanbic Bank", "Other"])
+                    kes_acc = st.text_input("Account Number", placeholder="e.g. 011000000000")
+                    destination = f"KES Bank: {kes_bank} | Acc: {kes_acc} | {creator_name}"
+                else:
+                    mpesa_phone = st.text_input("M-Pesa Registered Phone", placeholder="e.g. 254712345678")
+                    destination = f"KES M-Pesa: {mpesa_phone} | {creator_name}"
+            elif receiving_currency == "GHS":
+                st.caption("Ghanaian Bank or Mobile Money")
+                ghs_type = st.radio("Ghana Payout Destination", ["Mobile Money (MTN/Vodafone)", "Bank Account"], horizontal=True)
+                if ghs_type == "Mobile Money (MTN/Vodafone)":
+                    momo_net = st.selectbox("Network Provider", ["MTN Mobile Money", "Vodafone Cash", "AirtelTigo Money"])
+                    momo_phone = st.text_input("Mobile Money Phone", placeholder="e.g. 0244123456")
+                    destination = f"GHS MoMo: {momo_net} | {momo_phone} | {creator_name}"
+                else:
+                    ghs_bank = st.text_input("Bank Name", placeholder="e.g. Ecobank Ghana, GCB, Stanbic")
+                    ghs_acc = st.text_input("Account Number", placeholder="e.g. 1441000000000")
+                    destination = f"GHS Bank: {ghs_bank} | Acc: {ghs_acc} | {creator_name}"
+            elif receiving_currency == "EUR":
+                st.caption("SEPA Eurozone Bank Transfer")
+                eur_col1, eur_col2 = st.columns(2)
+                with eur_col1:
+                    eur_bank = st.text_input("Bank Name", placeholder="e.g. Deutsche Bank, BNP Paribas, Revolut")
+                    eur_iban = st.text_input("IBAN", placeholder="e.g. DE89 3704 0044 0532 0130 00")
+                with eur_col2:
+                    eur_bic = st.text_input("BIC / SWIFT", placeholder="e.g. DEUTDEDBFXX")
+                    eur_beneficiary = st.text_input("Account Holder Full Name", value=creator_name)
+                destination = f"EUR SEPA: {eur_bank} | IBAN: {eur_iban} | BIC: {eur_bic} | {eur_beneficiary}"
+            elif receiving_currency == "GBP":
+                st.caption("UK Bank Transfer (Faster Payments / BACS)")
+                gbp_col1, gbp_col2 = st.columns(2)
+                with gbp_col1:
+                    gbp_bank = st.text_input("Bank Name", placeholder="e.g. Barclays, HSBC, Lloyds, Monzo")
+                    gbp_sort = st.text_input("Sort Code (6 digits)", placeholder="e.g. 20-00-00")
+                with gbp_col2:
+                    gbp_acc = st.text_input("Account Number (8 digits)", placeholder="e.g. 12345678")
+                    gbp_name = st.text_input("Account Holder Name", value=creator_name)
+                destination = f"GBP UK: {gbp_bank} | Sort: {gbp_sort} | Acc: {gbp_acc} | {gbp_name}"
+            elif receiving_currency == "ZAR":
+                st.caption("South African Bank Transfer")
+                zar_bank = st.selectbox("Bank", ["Standard Bank", "First National Bank (FNB)", "Absa", "Nedbank", "Capitec Bank", "Investec", "Other"])
+                zar_acc = st.text_input("Account Number", placeholder="e.g. 62000000000")
+                zar_branch = st.text_input("Branch Code", placeholder="e.g. 250655")
+                destination = f"ZAR Bank: {zar_bank} | Branch: {zar_branch} | Acc: {zar_acc} | {creator_name}"
+            elif receiving_currency in ("CAD", "AUD"):
+                st.caption(f"{receiving_currency} Direct Bank Transfer")
+                c_bank = st.text_input("Bank Name", placeholder=f"e.g. RBC, TD, CommBank, ANZ")
+                c_code = st.text_input("Transit Number / BSB Code", placeholder="Transit/BSB code")
+                c_acc = st.text_input("Account Number", placeholder="Account Number")
+                destination = f"{receiving_currency} Bank: {c_bank} | Code: {c_code} | Acc: {c_acc} | {creator_name}"
             else:
                 destination = st.text_input(
                     f"{receiving_currency} Bank Account Details",
