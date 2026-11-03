@@ -10,9 +10,6 @@ Receives incoming Flutterwave webhook events:
   - charge.completed: Records verified gift credit purchases into webhook_logs.
 
 Connects directly to your persistent Turso libSQL database (or local SQLite).
-
-Usage:
-  python webhook_service.py [--port 8000]
 """
 
 import argparse
@@ -21,7 +18,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -38,14 +35,19 @@ except Exception as e:
 
 def get_secret_hash() -> str:
     """Retrieve secret webhook hash from environment or Streamlit secrets."""
-    secret_hash = os.environ.get("FLUTTERWAVE_SECRET_HASH", "")
+    secret_hash = os.environ.get("FLW_WEBHOOK_SECRET_HASH", "")
+    if not secret_hash:
+        secret_hash = os.environ.get("FLUTTERWAVE_SECRET_HASH", "")
     if secret_hash:
         return secret_hash.strip()
 
     try:
         import streamlit as st
-        if hasattr(st, "secrets") and "FLUTTERWAVE_SECRET_HASH" in st.secrets:
-            return str(st.secrets["FLUTTERWAVE_SECRET_HASH"]).strip()
+        if hasattr(st, "secrets"):
+            if "FLW_WEBHOOK_SECRET_HASH" in st.secrets:
+                return str(st.secrets["FLW_WEBHOOK_SECRET_HASH"]).strip()
+            if "FLUTTERWAVE_SECRET_HASH" in st.secrets:
+                return str(st.secrets["FLUTTERWAVE_SECRET_HASH"]).strip()
     except Exception:
         pass
 
@@ -55,10 +57,10 @@ def get_secret_hash() -> str:
             with open(secrets_file, "r", encoding="utf-8") as f:
                 for line in f:
                     stripped = line.strip()
-                    if stripped.startswith("FLUTTERWAVE_SECRET_HASH"):
+                    if stripped.startswith("FLW_WEBHOOK_SECRET_HASH") or stripped.startswith("FLUTTERWAVE_SECRET_HASH"):
                         parts = stripped.split("=", 1)
                         if len(parts) == 2:
-                            return parts[1].strip().strip('"\'')
+                            return parts[1].strip().strip("\"'")
         except Exception:
             pass
     return ""
@@ -87,7 +89,7 @@ class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "status": "healthy",
                 "service": "LifeGrid Webhook Microservice",
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 "secret_hash_configured": bool(get_secret_hash())
             })
         else:
@@ -96,9 +98,13 @@ class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Handle incoming Flutterwave webhook events."""
         configured_secret = get_secret_hash()
-        incoming_hash = self.headers.get("verif-hash", "")
+        if not configured_secret:
+            print("[SECURITY ERROR] Webhook secret hash not configured on server.")
+            self._send_json(503, {"status": "error", "message": "Server webhook secret is unconfigured"})
+            return
 
-        if configured_secret and incoming_hash != configured_secret:
+        incoming_hash = self.headers.get("verif-hash", "")
+        if incoming_hash != configured_secret:
             print(f"[SECURITY ALERT] Invalid webhook signature from {self.client_address[0]}")
             self._send_json(401, {"status": "error", "message": "Invalid webhook signature"})
             return
@@ -124,7 +130,7 @@ class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
         try:
             conn = get_connection()
             cursor = conn.cursor()
-            now_iso = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
             # 1. Log event into webhook_logs
             cursor.execute("""
@@ -150,28 +156,39 @@ class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
 
                 if row and str(row[3]).lower() != "failed":
                     user_id, amount, currency = row[0], row[1], row[2]
-                    # Update status
                     cursor.execute("""
                         UPDATE creator_withdrawals
                         SET status = 'failed', updated_at = ?
                         WHERE withdrawal_reference = ?
                     """, (now_iso, reference))
 
-                    # Refund wallet balance
                     cursor.execute("""
                         UPDATE wallets
                         SET balance = balance + ?
                         WHERE user_id = ?
                     """, (amount, user_id))
 
-                    # Record refund in audit ledger
-                    receipt_id = f"REF-{uuid.uuid4().hex[:12].upper()}"
+                    # Read new balance for ledger audit
+                    w_row = cursor.execute("SELECT balance FROM wallets WHERE user_id = ?", (user_id,)).fetchone()
+                    new_bal = w_row[0] if w_row else amount
+
+                    # Record refund in financial_audit_ledger
+                    ledger_ref = f"LEDGER-REFUND-{uuid.uuid4().hex[:8].upper()}"
+                    prev_hash = "PAYOUT-REFUND-ROOT"
+                    entry_raw = f"{ledger_ref}|{user_id}|{reference}|PAYOUT_REFUND|{amount}|{currency}|{new_bal}|{prev_hash}"
+                    entry_hash = hashlib.sha256(entry_raw.encode("utf-8")).hexdigest()
+
                     cursor.execute("""
                         INSERT INTO financial_audit_ledger (
-                            receipt_id, transaction_type, reference_code, user_id,
-                            amount, currency, status, created_at
-                        ) VALUES (?, 'payout_refund', ?, ?, ?, ?, 'refunded', ?)
-                    """, (receipt_id, reference, user_id, amount, currency, now_iso))
+                            ledger_entry_id, user_id, transaction_ref, event_type,
+                            debit, credit, fee, balance_after, currency,
+                            entry_hash, prev_hash, created_at
+                        )
+                        VALUES (?, ?, ?, 'PAYOUT_REFUND', 0.0, ?, 0.0, ?, ?, ?, ?, ?)
+                    """, (
+                        ledger_ref, user_id, reference, float(amount),
+                        float(new_bal), str(currency or "NGN"), entry_hash, prev_hash, now_iso
+                    ))
 
             conn.commit()
             self._send_json(200, {"status": "success", "event": event_type, "reference": reference})
@@ -181,8 +198,7 @@ class FlutterwaveWebhookHandler(BaseHTTPRequestHandler):
             self._send_json(500, {"status": "error", "message": str(exc)})
 
     def log_message(self, format, *args):
-        # Clean logging format
-        print(f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {args[0]} {args[1]} {args[2]}")
+        print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}] {args[0]} {args[1]} {args[2]}")
 
 
 def run(port: int = 8000):

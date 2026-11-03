@@ -1,0 +1,30 @@
+{
+  "packageId": "com.lifegrid.app",
+  "host": "lifegrid-h6wgbnrcoinoedrcivbzb3.streamlit.app",
+  "name": "LifeGrid",
+  "launcherName": "LifeGrid",
+  "themeColor": "#0E1117",
+  "navigationColor": "#0E1117",
+  "backgroundColor": "#0E1117",
+  "startUrl": "/",
+  "iconUrl": "https://lifegrid-h6wgbnrcoinoedrcivbzb3.streamlit.app/app/static/icon-512.png",
+  "maskableIconUrl": "https://lifegrid-h6wgbnrcoinoedrcivbzb3.streamlit.app/app/static/icon-512.png",
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://lifegrid-h6wgbnrcoinoedrcivbzb3.streamlit.app/app/static/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {
+    "locationDelegation": {
+      "enabled": false
+    },
+    "playBilling": {
+      "enabled": false
+    }
+  },
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableNotifications": true
+}

@@ -2,14 +2,16 @@
 LifeGrid Crypto Payment & Deposit Gateway Service.
 Supports real multi-blockchain crypto deposits (USDT, BTC, ETH, USDC)
 via NOWPayments API, with automatic wallet asset settlement in Turso.
+Fail-closed architecture: never returns fake addresses in production.
 """
 
 import os
 import json
 import uuid
+import hashlib
 import urllib.request
 import urllib.error
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 # Try importing Streamlit secrets if running inside Streamlit
@@ -40,9 +42,9 @@ def get_nowpayments_api_key():
 
 
 def is_crypto_gateway_configured():
-    """Check if crypto gateway API key is configured."""
+    """Check if crypto gateway API key is configured with a valid live key."""
     key = get_nowpayments_api_key()
-    return bool(key and len(key) >= 10 and not key.startswith("YOUR_"))
+    return bool(key and len(key) >= 15 and not key.startswith("YOUR_"))
 
 
 def get_crypto_gateway_mode():
@@ -57,10 +59,9 @@ SUPPORTED_CRYPTO_CURRENCIES = {
         "asset_code": "USDT",
         "network": "Tron (TRC-20)",
         "pay_currency": "usdttrc20",
-        "display_name": "USDT • Tron (TRC-20) — Fastest & Lowest Fee",
+        "display_name": "USDT • Tron (TRC-20) — Lowest Fee & Fast",
         "symbol": "USDT",
         "min_deposit": 5.0,
-        "sample_address": "TYP7qFh8y9K1vZjWp3mNxRtLsDqBcVm5Qk",
     },
     "USDT_ERC20": {
         "asset_code": "USDT",
@@ -69,7 +70,6 @@ SUPPORTED_CRYPTO_CURRENCIES = {
         "display_name": "USDT • Ethereum (ERC-20)",
         "symbol": "USDT",
         "min_deposit": 10.0,
-        "sample_address": "0x71C8363837918fb3799b034F4750c82B8b8B8f7A",
     },
     "USDC": {
         "asset_code": "USDC",
@@ -78,7 +78,6 @@ SUPPORTED_CRYPTO_CURRENCIES = {
         "display_name": "USDC • USD Coin",
         "symbol": "USDC",
         "min_deposit": 10.0,
-        "sample_address": "0x4A6b92aE09fB198A2f1b4c3e80F8eBc45cD32190",
     },
     "BTC": {
         "asset_code": "BTC",
@@ -87,7 +86,6 @@ SUPPORTED_CRYPTO_CURRENCIES = {
         "display_name": "BTC • Bitcoin Network",
         "symbol": "BTC",
         "min_deposit": 0.0002,
-        "sample_address": "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
     },
     "ETH": {
         "asset_code": "ETH",
@@ -96,7 +94,6 @@ SUPPORTED_CRYPTO_CURRENCIES = {
         "display_name": "ETH • Ethereum Network",
         "symbol": "ETH",
         "min_deposit": 0.003,
-        "sample_address": "0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5",
     },
 }
 
@@ -109,9 +106,9 @@ def create_crypto_deposit_order(
     description="LifeGrid Crypto Wallet Deposit"
 ):
     """
-    Creates a crypto deposit invoice / order.
-    Calls NOWPayments if configured, or generates a sandbox deposit session.
-    Records pending transaction in crypto_transactions.
+    Creates a crypto deposit invoice.
+    Calls NOWPayments API when live, or creates a labeled sandbox session.
+    Fails closed: never provides mock addresses as real deposit targets.
     """
     config = SUPPORTED_CRYPTO_CURRENCIES.get(asset_key, SUPPORTED_CRYPTO_CURRENCIES["USDT_TRC20"])
     asset_code = config["asset_code"]
@@ -119,7 +116,7 @@ def create_crypto_deposit_order(
     pay_currency = config["pay_currency"]
 
     ref = f"LG-CRYPTO-{uuid.uuid4().hex[:10].upper()}"
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     api_key = get_nowpayments_api_key()
 
@@ -136,28 +133,34 @@ def create_crypto_deposit_order(
         headers = {
             "x-api-key": api_key,
             "Content-Type": "application/json",
+            "User-Agent": "LifeGrid/1.0",
         }
         try:
             req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                deposit_address = data.get("pay_address") or config["sample_address"]
+                deposit_address = data.get("pay_address")
+                if not deposit_address:
+                    return {"success": False, "error": "Gateway returned response without deposit address."}
                 pay_amount = float(data.get("pay_amount") or amount_usd)
                 payment_id = str(data.get("payment_id") or "")
                 status = str(data.get("payment_status") or "waiting")
+        except urllib.error.HTTPError as http_err:
+            try:
+                err_body = json.loads(http_err.read().decode("utf-8"))
+                msg = err_body.get("message") or str(http_err)
+            except Exception:
+                msg = str(http_err)
+            return {"success": False, "error": f"NOWPayments API Error ({http_err.code}): {msg}"}
         except Exception as e:
-            # Fallback to local reference if gateway call fails
-            deposit_address = config["sample_address"]
-            pay_amount = float(amount_usd)
-            payment_id = ref
-            status = "waiting"
+            # FAIL CLOSED: Do not substitute a fake address
+            return {"success": False, "error": f"Crypto payment gateway unreachable: {str(e)}"}
     else:
-        # Sandbox / Demo Mode
-        # Generate consistent sandbox deposit address based on user_id
-        deposit_address = config["sample_address"]
+        # Sandbox / Demo Mode: Explicitly labeled mock address
+        deposit_address = f"DEMO-MOCK-ADDRESS-DO-NOT-SEND-FUNDS-{asset_code}"
         pay_amount = float(amount_usd)
-        payment_id = f"SANDBOX-{ref}"
-        status = "waiting"
+        payment_id = f"DEMO-{ref}"
+        status = "sandbox_pending"
 
     # Save to crypto_transactions table
     cursor = connection.cursor()
@@ -202,6 +205,7 @@ def create_crypto_deposit_order(
         "pay_amount": pay_amount,
         "deposit_address": deposit_address,
         "status": status,
+        "is_demo": not is_crypto_gateway_configured(),
         "mode": get_crypto_gateway_mode(),
     }
 
@@ -209,9 +213,10 @@ def create_crypto_deposit_order(
 def settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, reference, connection):
     """
     Idempotently credits user's wallet_assets balance and logs to financial_audit_ledger.
+    Matches the Turso schema columns exactly.
     """
     cursor = connection.cursor()
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # Check if this reference was already credited
     cursor.execute(
@@ -222,7 +227,7 @@ def settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, refere
         (reference,)
     )
     row = cursor.fetchone()
-    if row and row[1] == "completed":
+    if row and str(row[1]).lower() == "completed":
         return True, "Deposit was already settled into wallet."
 
     # Update crypto_transactions status
@@ -245,7 +250,9 @@ def settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, refere
     )
     asset_row = cursor.fetchone()
 
+    new_bal = amount
     if asset_row:
+        new_bal = float(asset_row[1] or 0.0) + float(amount)
         cursor.execute(
             """
             UPDATE wallet_assets
@@ -269,30 +276,36 @@ def settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, refere
             (user_id, asset_code, network, amount, amount, now_str, now_str)
         )
 
-    # Log to financial_audit_ledger
+    # Log to financial_audit_ledger using exact schema
     try:
         ledger_ref = f"LEDGER-CRYPTO-{uuid.uuid4().hex[:8].upper()}"
+        prev_hash = "CRYPTO-SETTLE-ROOT"
+        entry_raw = f"{ledger_ref}|{user_id}|{reference}|CRYPTO_DEPOSIT|{amount}|{asset_code}|{new_bal}|{prev_hash}"
+        entry_hash = hashlib.sha256(entry_raw.encode("utf-8")).hexdigest()
+
         cursor.execute(
             """
             INSERT INTO financial_audit_ledger (
                 ledger_entry_id, user_id, transaction_ref, event_type,
-                amount, currency, previous_balance, new_balance, notes, created_at
+                debit, credit, fee, balance_after, currency,
+                entry_hash, prev_hash, created_at
             )
-            VALUES (?, ?, ?, 'CRYPTO_DEPOSIT', ?, ?, 0.0, ?, ?, ?)
+            VALUES (?, ?, ?, 'CRYPTO_DEPOSIT', 0.0, ?, 0.0, ?, ?, ?, ?, ?)
             """,
             (
                 ledger_ref,
                 user_id,
                 reference,
-                amount,
+                float(amount),
+                float(new_bal),
                 asset_code,
-                amount,
-                f"Settled {amount} {asset_code} ({network}) deposit via crypto gateway",
+                entry_hash,
+                prev_hash,
                 now_str
             )
         )
-    except Exception:
-        pass
+    except Exception as audit_err:
+        print(f"[AUDIT WARNING] Ledger write error: {audit_err}")
 
     connection.commit()
     return True, f"Successfully credited {amount} {asset_code} to your LifeGrid wallet!"
@@ -300,12 +313,13 @@ def settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, refere
 
 def verify_crypto_deposit_status(reference, connection):
     """
-    Verifies deposit status with NOWPayments or settles sandbox deposit.
+    Verifies deposit status with NOWPayments API.
+    Only settles after actual provider verification.
     """
     cursor = connection.cursor()
     cursor.execute(
         """
-        SELECT user_id, asset_code, network, amount, status
+        SELECT user_id, asset_code, network, amount, status, recipient_address
         FROM crypto_transactions
         WHERE reference = ?
         """,
@@ -315,10 +329,50 @@ def verify_crypto_deposit_status(reference, connection):
     if not row:
         return False, "Deposit reference not found."
 
-    user_id, asset_code, network, amount, current_status = row
+    user_id, asset_code, network, amount, current_status, recip_addr = row
 
-    if current_status == "completed":
+    if str(current_status).lower() == "completed":
         return True, "Deposit is already completed and credited."
 
-    # If in sandbox or demo mode, user verifying confirms deposit settlement
-    return settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, reference, connection)
+    # If Live NOWPayments Gateway is configured
+    if is_crypto_gateway_configured():
+        api_key = get_nowpayments_api_key()
+        # Find payment by order_id or reference
+        url = f"https://api.nowpayments.io/v1/payment/?limit=10&page=0"
+        headers = {
+            "x-api-key": api_key,
+            "User-Agent": "LifeGrid/1.0",
+        }
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                payments = data.get("data", [])
+                matching = None
+                for p in payments:
+                    if p.get("order_id") == reference:
+                        matching = p
+                        break
+
+                if not matching:
+                    return False, "Deposit invoice created; awaiting payment broadcast on the blockchain."
+
+                pay_status = str(matching.get("payment_status", "")).lower()
+                if pay_status in ("finished", "confirmed"):
+                    return settle_crypto_deposit_to_wallet(user_id, asset_code, network, amount, reference, connection)
+                elif pay_status in ("waiting", "partially_paid"):
+                    return False, f"Payment detected ({pay_status}); awaiting network confirmation."
+                elif pay_status in ("failed", "refunded", "expired"):
+                    cursor.execute(
+                        "UPDATE crypto_transactions SET status = ? WHERE reference = ?",
+                        (pay_status, reference)
+                    )
+                    connection.commit()
+                    return False, f"Payment marked as {pay_status} by NOWPayments."
+                else:
+                    return False, f"Current blockchain status: {pay_status}"
+        except Exception as e:
+            return False, f"Unable to reach NOWPayments verification endpoint: {str(e)}"
+    else:
+        # Sandbox mode
+        return False, "In Sandbox mode. Configure NOWPAYMENTS_API_KEY to verify live blockchain payments. For testing balances, use the Development Crypto Balance tool."
