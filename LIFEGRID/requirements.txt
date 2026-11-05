@@ -6,4 +6,5 @@ python-dateutil>=2.8.2
 bcrypt>=4.1.0
 pillow>=10.0.0
 libsql-experimental>=0.0.34
-
+streamlit-webrtc>=0.47.0
+av>=12.0.0
