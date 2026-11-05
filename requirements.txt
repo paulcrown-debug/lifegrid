@@ -1,0 +1,10 @@
+streamlit>=1.35.0
+requests>=2.31.0
+pandas>=2.0.0
+cryptography>=42.0.0
+python-dateutil>=2.8.2
+bcrypt>=4.1.0
+pillow>=10.0.0
+libsql-experimental>=0.0.34
+streamlit-webrtc>=0.47.0
+av>=12.0.0
