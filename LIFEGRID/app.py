@@ -619,6 +619,30 @@ with st.sidebar:
 # MY GRID DASHBOARD
 # ============================================================
 
+# CSS to ensure dashboard features arrange horizontally and stay responsive
+st.markdown(
+    """
+    <style>
+    /* Keep dashboard feature blocks horizontally aligned */
+    div[data-testid="stHorizontalBlock"] {
+        gap: 0.75rem !important;
+    }
+    @media (max-width: 768px) {
+        div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: wrap !important;
+            gap: 0.5rem !important;
+        }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            min-width: calc(50% - 0.5rem) !important;
+            flex: 1 1 calc(50% - 0.5rem) !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title(
     f"🌍 Welcome to {APP_NAME}, {display_name}"
 )
@@ -635,7 +659,7 @@ st.divider()
 
 
 # ============================================================
-# OVERVIEW METRICS
+# HORIZONTAL ROW 1: OVERVIEW METRICS & WALLET SUMMARY
 # ============================================================
 
 goal_count = get_user_goal_count(
@@ -654,322 +678,146 @@ wallet = get_user_wallet(
     user_id
 )
 
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-
-    st.metric(
-        "Active Account",
-        "Yes",
-    )
-
-with col2:
-
-    st.metric(
-        "Goals",
-        goal_count,
-    )
-
-with col3:
-
-    st.metric(
-        "Help Activity",
-        help_count,
-    )
-
-with col4:
-
-    st.metric(
-        "Connections",
-        connection_count,
-    )
-
-
-# ============================================================
-# WALLET SUMMARY
-# ============================================================
-
-st.subheader(
-    "💰 Wallet Summary"
-)
-
-wallet_col1, wallet_col2, wallet_col3 = st.columns(3)
-
 if wallet:
-
-    wallet_balance = float(
-        wallet[0] or 0
-    )
-
-    pending_balance = float(
-        wallet[1] or 0
-    )
-
+    wallet_balance = float(wallet[0] or 0)
+    pending_balance = float(wallet[1] or 0)
     wallet_currency = wallet[2] or currency
-
     wallet_status = wallet[3] or "Active"
-
 else:
-
     wallet_balance = 0.0
-
     pending_balance = 0.0
-
     wallet_currency = currency
-
     wallet_status = "Active"
 
+col_overview, col_wallet = st.columns([1.2, 1.0])
 
-with wallet_col1:
+with col_overview:
+    st.subheader("📊 LifeGrid Overview")
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("Active Account", "Yes")
+    with m2:
+        st.metric("Goals", goal_count)
+    with m3:
+        st.metric("Help Activity", help_count)
+    with m4:
+        st.metric("Connections", connection_count)
 
-    st.metric(
-        "Available Balance",
-        format_currency(
-            wallet_balance,
-            wallet_currency,
-        ),
-    )
+with col_wallet:
+    st.subheader("💰 Wallet Summary")
+    w1, w2, w3 = st.columns(3)
+    with w1:
+        st.metric(
+            "Available Balance",
+            format_currency(wallet_balance, wallet_currency),
+        )
+    with w2:
+        st.metric(
+            "Pending Balance",
+            format_currency(pending_balance, wallet_currency),
+        )
+    with w3:
+        st.metric("Wallet Status", wallet_status)
 
-
-with wallet_col2:
-
-    st.metric(
-        "Pending Balance",
-        format_currency(
-            pending_balance,
-            wallet_currency,
-        ),
-    )
-
-
-with wallet_col3:
-
-    st.metric(
-        "Wallet Status",
-        wallet_status,
-    )
+st.divider()
 
 
 # ============================================================
-# QUICK ACTIONS
+# HORIZONTAL ROW 2: QUICK FEATURES & ACTIONS
 # ============================================================
 
-st.subheader(
-    "⚡ Quick Actions"
-)
+st.subheader("⚡ Quick Features")
 
-quick_col1, quick_col2, quick_col3, quick_col4 = st.columns(4)
+q1, q2, q3, q4, q5, q6, q7, q8 = st.columns(8)
 
-with quick_col1:
-
-    if st.button(
-        "🎯 My Goals",
-        use_container_width=True,
-    ):
+with q1:
+    if st.button("🎯 My Goals", use_container_width=True):
         st.switch_page(PAGE_GOALS)
 
-
-with quick_col2:
-
-    if st.button(
-        "🤝 Get Help",
-        use_container_width=True,
-    ):
+with q2:
+    if st.button("🤝 Get Help", use_container_width=True):
         st.switch_page(PAGE_HELP)
 
-
-with quick_col3:
-
-    if st.button(
-        "💰 My Wallet",
-        use_container_width=True,
-    ):
+with q3:
+    if st.button("💰 My Wallet", use_container_width=True):
         st.switch_page(PAGE_WALLET)
 
-
-with quick_col4:
-
-    if st.button(
-        "🤝 Connections",
-        use_container_width=True,
-    ):
+with q4:
+    if st.button("🤝 Connections", use_container_width=True):
         st.switch_page(PAGE_CONNECTIONS)
 
-
-quick_col5, quick_col6, quick_col7, quick_col8 = st.columns(4)
-
-with quick_col5:
-
-    if st.button(
-        "🔔 Notifications",
-        use_container_width=True,
-    ):
+with q5:
+    if st.button("🔔 Notifications", use_container_width=True):
         st.switch_page(PAGE_NOTIFICATIONS)
 
-
-with quick_col6:
-
-    if st.button(
-        "💬 Messages",
-        use_container_width=True,
-    ):
+with q6:
+    if st.button("💬 Messages", use_container_width=True):
         st.switch_page(PAGE_MESSAGES)
 
-
-with quick_col7:
-
-    if st.button(
-        "🔴 Live",
-        use_container_width=True,
-    ):
+with q7:
+    if st.button("🔴 Live", use_container_width=True):
         st.switch_page(PAGE_LIVE)
 
-
-with quick_col8:
-
-    if st.button(
-        "🎁 Gift Store",
-        use_container_width=True,
-    ):
+with q8:
+    if st.button("🎁 Gift Store", use_container_width=True):
         st.switch_page(PAGE_GIFT_STORE)
 
-
-# ============================================================
-# PERSONAL GRID
-# ============================================================
-
-st.subheader(
-    "🧩 Personal Grid"
-)
-
-st.write(
-    "Your LifeGrid brings your goals, help activities, "
-    "connections, wallet and future opportunities together "
-    "in one place."
-)
+st.divider()
 
 
 # ============================================================
-# HELP
+# HORIZONTAL ROW 3: PERSONAL GRID, HELP & GROWTH
 # ============================================================
 
-st.subheader(
-    "🤝 Help"
-)
+grid_col, help_col, growth_col = st.columns(3)
 
-help_col1, help_col2 = st.columns(2)
-
-with help_col1:
-
-    st.info(
-        "Request help from people in the LifeGrid community."
-    )
-
-with help_col2:
-
-    st.info(
-        "Offer help and participate in meaningful activities."
-    )
-
-
-# ============================================================
-# GROWTH
-# ============================================================
-
-st.subheader(
-    "📈 Growth"
-)
-
-growth_col1, growth_col2, growth_col3 = st.columns(3)
-
-with growth_col1:
-
-    st.info(
-        "🎯 Goals\n\n"
-        "Set personal goals and track your progress."
-    )
-
-with growth_col2:
-
-    st.info(
-        "🤝 Connections\n\n"
-        "Build meaningful connections with other users."
-    )
-
-with growth_col3:
-
-    st.info(
-        "💡 Opportunities\n\n"
-        "Discover future opportunities on LifeGrid."
-    )
-
-
-# ============================================================
-# RECENT ACTIVITY
-# ============================================================
-
-st.subheader(
-    "🕒 Recent Activity"
-)
-
-st.info(
-    "Your recent LifeGrid activities will appear here."
-)
-
-
-# ============================================================
-# LIFEGRID PLATFORM
-# ============================================================
-
-st.subheader(
-    "🌍 LifeGrid Platform"
-)
-
-platform_col1, platform_col2, platform_col3, platform_col4 = st.columns(4)
-
-with platform_col1:
-
+with grid_col:
+    st.subheader("🧩 Personal Grid")
     st.write(
-        "💬 Messaging"
+        "Your LifeGrid brings your goals, help activities, "
+        "connections, wallet and future opportunities together "
+        "in one place."
     )
 
-    st.caption(
-        "Connect and communicate with other users."
-    )
+with help_col:
+    st.subheader("🤝 Help")
+    st.info("Request help from people in the LifeGrid community.")
+    st.info("Offer help and participate in meaningful activities.")
 
-with platform_col2:
+with growth_col:
+    st.subheader("📈 Growth")
+    st.info("🎯 **Goals:** Set personal goals and track your progress.")
+    st.info("🤝 **Connections:** Build meaningful connections with others.")
+    st.info("💡 **Opportunities:** Discover future opportunities on LifeGrid.")
 
-    st.write(
-        "📺 Live"
-    )
+st.divider()
 
-    st.caption(
-        "Join Live Rooms, interact in real time, "
-        "and connect with the LifeGrid community."
-    )
 
-with platform_col3:
+# ============================================================
+# HORIZONTAL ROW 4: PLATFORM & RECENT ACTIVITY
+# ============================================================
 
-    st.write(
-        "🎁 Gift Store"
-    )
+platform_col, activity_col = st.columns([1.6, 1.0])
 
-    st.caption(
-        "Send gifts to other LifeGrid users and "
-        "support creators during Live."
-    )
+with platform_col:
+    st.subheader("🌍 LifeGrid Platform")
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        st.write("💬 **Messaging**")
+        st.caption("Connect and communicate with other users.")
+    with p2:
+        st.write("📺 **Live**")
+        st.caption("Join Live Rooms, interact in real time, and connect.")
+    with p3:
+        st.write("🎁 **Gift Store**")
+        st.caption("Send gifts to other LifeGrid users and support creators.")
+    with p4:
+        st.write("🛍️ **Marketplace**")
+        st.caption("Services, products and opportunities as LifeGrid develops.")
 
-with platform_col4:
-
-    st.write(
-        "🛍️ Marketplace"
-    )
-
-    st.caption(
-        "Services, products and opportunities will "
-        "be added as LifeGrid develops."
-    )
+with activity_col:
+    st.subheader("🕒 Recent Activity")
+    st.info("Your recent LifeGrid activities will appear here.")
 
 
 # ============================================================
